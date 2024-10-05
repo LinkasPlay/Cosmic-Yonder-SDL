@@ -1,0 +1,13 @@
+{
+    "files.associations": {
+        "stdlib.h": "c",
+        "texture.h": "c",
+        "unistd.h": "c",
+        "stdio.h": "c",
+        "math.h": "c",
+        "string.h": "c",
+        "sdl_ttf.h": "c",
+        "sdl.h": "c",
+        "sdl_mixer.h": "c"
+    }
+}
