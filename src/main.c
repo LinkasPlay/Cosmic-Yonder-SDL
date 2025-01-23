@@ -18,40 +18,112 @@ Mix_Chunk *sonDamage = NULL;
 Mix_Chunk *sonRoom = NULL;
 Mix_Chunk *sonHover = NULL;
 Mix_Chunk *gameOverSound = NULL;
+Mix_Chunk *swordSound = NULL;
+Mix_Chunk *gunSound = NULL;
+Mix_Chunk *mobHurtSound1 = NULL;
+Mix_Chunk *mobDeadSound1 = NULL;
+Mix_Chunk *sonLevelUp = NULL;
+Mix_Chunk *sonPotionLife = NULL;
+Mix_Chunk *sonPotionXP = NULL;
+Mix_Chunk *sonWrench = NULL;
+Mix_Chunk *sonKey = NULL;
+Mix_Chunk *sonBigKey = NULL;
+Mix_Chunk *sonFail = NULL;
+Mix_Chunk *sonSwordPickup = NULL;
 
 void initialiserSons() {
-    // Charger les sons
+    // Allouer les canaux nécessaires
+    Mix_AllocateChannels(64);
 
-    Mix_AllocateChannels(16);
-    
+    // Charger les sons existants
     sonMenu = Mix_LoadWAV("./src/musique/pause.mp3");
-    if (sonMenu == NULL) {
+    if (!sonMenu) {
         SDL_Log("Erreur chargement son pause: %s", Mix_GetError());
     }
 
+    swordSound = Mix_LoadWAV("./src/musique/sword.mp3");
+    if (!swordSound) {
+        SDL_Log("Erreur chargement son épée: %s", Mix_GetError());
+    }
+
+    gunSound = Mix_LoadWAV("./src/musique/gun.mp3");
+    if (!gunSound) {
+        SDL_Log("Erreur chargement son pistolet: %s", Mix_GetError());
+    }
+
+    mobHurtSound1 = Mix_LoadWAV("./src/musique/mobHurt1.mp3");
+    if (!mobHurtSound1) {
+        SDL_Log("Erreur chargement son dégât monstre: %s", Mix_GetError());
+    }
+
+    mobDeadSound1 = Mix_LoadWAV("./src/musique/mobDead1.mp3");
+    if (!mobDeadSound1) {
+        SDL_Log("Erreur chargement son mort monstre: %s", Mix_GetError());
+    }
+
     sonHover = Mix_LoadWAV("./src/musique/hover.mp3");
-    if (sonMenu == NULL) {
+    if (!sonHover) {
         SDL_Log("Erreur chargement son hover: %s", Mix_GetError());
     }
 
     gameOverSound = Mix_LoadWAV("./src/musique/gameover.mp3");
-    if (sonMenu == NULL) {
-        SDL_Log("Erreur chargement son pause: %s", Mix_GetError());
+    if (!gameOverSound) {
+        SDL_Log("Erreur chargement son gameover: %s", Mix_GetError());
     }
 
     sonMove = Mix_LoadWAV("./src/musique/move.mp3");
-    if (sonMove == NULL) {
-        SDL_Log("Erreur chargement son move: %s", Mix_GetError());
+    if (!sonMove) {
+        SDL_Log("Erreur chargement son déplacement: %s", Mix_GetError());
     }
 
     sonDamage = Mix_LoadWAV("./src/musique/damage.mp3");
-    if (sonDamage == NULL) {
-        SDL_Log("Erreur chargement son damage: %s", Mix_GetError());
+    if (!sonDamage) {
+        SDL_Log("Erreur chargement son dégâts: %s", Mix_GetError());
     }
 
     sonRoom = Mix_LoadWAV("./src/musique/room.mp3");
-    if (sonRoom == NULL) {
-        SDL_Log("Erreur chargement son room: %s", Mix_GetError());
+    if (!sonRoom) {
+        SDL_Log("Erreur chargement son salle: %s", Mix_GetError());
+    }
+
+    sonLevelUp = Mix_LoadWAV("./src/musique/level_up.mp3");
+    if (!sonLevelUp) {
+        SDL_Log("Erreur chargement son gain niveau: %s", Mix_GetError());
+    }
+
+    sonPotionLife = Mix_LoadWAV("./src/musique/potion_life.mp3");
+    if (!sonPotionLife) {
+        SDL_Log("Erreur chargement son potion vie: %s", Mix_GetError());
+    }
+
+    sonPotionXP = Mix_LoadWAV("./src/musique/potion_xp.mp3");
+    if (!sonPotionXP) {
+        SDL_Log("Erreur chargement son potion XP: %s", Mix_GetError());
+    }
+
+    sonWrench = Mix_LoadWAV("./src/musique/wrench.mp3");
+    if (!sonWrench) {
+        SDL_Log("Erreur chargement son clé à molette: %s", Mix_GetError());
+    }
+
+    sonKey = Mix_LoadWAV("./src/musique/key.mp3");
+    if (!sonKey) {
+        SDL_Log("Erreur chargement son clé: %s", Mix_GetError());
+    }
+
+    sonBigKey = Mix_LoadWAV("./src/musique/big_key.mp3");
+    if (!sonBigKey) {
+        SDL_Log("Erreur chargement son grande clé: %s", Mix_GetError());
+    }
+
+    sonFail = Mix_LoadWAV("./src/musique/fail.mp3");
+    if (!sonFail) {
+        SDL_Log("Erreur chargement son échec: %s", Mix_GetError());
+    }
+
+    sonSwordPickup = Mix_LoadWAV("./src/musique/sword_pickup.mp3");
+    if (!sonSwordPickup) {
+        SDL_Log("Erreur chargement son prise épée: %s", Mix_GetError());
     }
 }
 
@@ -61,6 +133,11 @@ void clean_ressources(SDL_Window *w, SDL_Renderer *r, SDL_Texture *t) {
     Mix_FreeChunk(sonMove);
     Mix_FreeChunk(sonDamage);
     Mix_FreeChunk(sonRoom);
+    Mix_FreeChunk(swordSound);
+    Mix_FreeChunk(gunSound);
+    Mix_FreeChunk(mobHurtSound1);
+    Mix_FreeChunk(mobDeadSound1);
+
 
     // Autres nettoyages
     if(t != NULL){
@@ -82,6 +159,7 @@ SDL_Window *window = NULL;
 SDL_Renderer *renderer = NULL; 
 Mix_Music *menuMusic = NULL;
 Mix_Music *gameMusic = NULL;
+Mix_Music *musique_acceleree = NULL;
 
 int afficherMenuPrincipal(SDL_Renderer *renderer) {
     SDL_Surface *background = NULL;
@@ -94,6 +172,12 @@ int afficherMenuPrincipal(SDL_Renderer *renderer) {
     }
 
     TTF_Font *font = TTF_OpenFont("./src/fonts/SPACEBAR.ttf", 32);
+    if (!font) {
+        SDL_Log("Erreur lors du chargement de la police : %s\n", TTF_GetError());
+        return EXIT_FAILURE;
+    }
+
+    TTF_Font *fontUI = TTF_OpenFont("./src/fonts/ui.otf", 32);
     if (!font) {
         SDL_Log("Erreur lors du chargement de la police : %s\n", TTF_GetError());
         return EXIT_FAILURE;
@@ -117,6 +201,13 @@ int afficherMenuPrincipal(SDL_Renderer *renderer) {
     // Charger la musique du menu
     menuMusic = Mix_LoadMUS("./src/musique/menu.mp3");
     if (!menuMusic) {
+        SDL_Log("Erreur lors du chargement de la musique du menu : %s\n", Mix_GetError());
+        return EXIT_FAILURE;
+    }
+
+    // Charger la musique du vaisseau accéléré
+    musique_acceleree = Mix_LoadMUS("./src/musique/tension.mp3");
+    if (!musique_acceleree) {
         SDL_Log("Erreur lors du chargement de la musique du menu : %s\n", Mix_GetError());
         return EXIT_FAILURE;
     }
@@ -200,7 +291,7 @@ int afficherMenuPrincipal(SDL_Renderer *renderer) {
                     if (event.button.button == SDL_BUTTON_LEFT) {
                         // Bouton Nouvelle Partie
                         if (hover_new_game) {
-                            Mix_PlayChannel(-1, sonHover, 0);
+                            Mix_PlayChannel(CHANNEL_HOVER, sonHover, 0);
                             Mix_HaltMusic();  // Arrêter la musique du menu
                             Mix_FreeMusic(menuMusic);  // Libérer la musique du menu
 
@@ -215,7 +306,7 @@ int afficherMenuPrincipal(SDL_Renderer *renderer) {
                         }
                         // Bouton Quitter
                         if (hover_quit) {
-                            Mix_PlayChannel(-1, sonHover, 0);
+                            Mix_PlayChannel(CHANNEL_HOVER, sonHover, 0);
                             SDL_Log("Fermeture du programme...");
                             Mix_HaltMusic();
                             Mix_FreeMusic(menuMusic);
@@ -286,26 +377,19 @@ int afficherMenuPrincipal(SDL_Renderer *renderer) {
 }
 
 int main(int argc, char **argv) {
-    // Initialiser SDL et SDL_mixer
+    // Initialiser SDL
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) != 0) {
         SDL_Log("Erreur : Initialisation SDL > %s\n", SDL_GetError());
         exit(EXIT_FAILURE);
     }
 
     // Initialiser SDL_mixer
-    if (Mix_OpenAudio(44100, MIX_DEFAULT_FORMAT, 2, 2048) == -1) {
-        SDL_Log("Erreur lors de l'initialisation de SDL_mixer : %s\n", Mix_GetError());
-        SDL_Quit();
-        exit(EXIT_FAILURE);
-    }
-
     if (Mix_OpenAudio(44100, MIX_DEFAULT_FORMAT, 2, 2048) < 0) {
         SDL_Log("Erreur lors de l'initialisation du Mix_OpenAudio: %s", Mix_GetError());
         exit(EXIT_FAILURE);
     }
 
     initialiserSons(); // Charger les sons ici
-
 
     // Créer la fenêtre
     window = SDL_CreateWindow("Cosmic Yonder", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1500, 900, 0);

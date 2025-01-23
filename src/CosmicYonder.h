@@ -6,6 +6,25 @@
 #define WINDOW_HEIGHT 900
 #define FPS_LIMIT 16
 
+// Définition des canaux audio spécifiques
+#define CHANNEL_MENU 0
+#define CHANNEL_MOVE 1
+#define CHANNEL_DAMAGE 2
+#define CHANNEL_ROOM 3
+#define CHANNEL_SWORD 4
+#define CHANNEL_GUN 5
+#define CHANNEL_MONSTER_HURT 6
+#define CHANNEL_MONSTER_DEAD 7
+#define CHANNEL_HOVER 8
+#define CHANNEL_LEVEL_UP 9
+#define CHANNEL_POTION_LIFE 10
+#define CHANNEL_POTION_XP 11
+#define CHANNEL_WRENCH 12
+#define CHANNEL_KEY 13
+#define CHANNEL_BIG_KEY 14
+#define CHANNEL_FAIL 15
+#define CHANNEL_SWORD_PICKUP 16
+
 extern void SDL_ExitWithError(const char *message);
 extern int texture( int argc, char **argv);
 /*
@@ -21,8 +40,13 @@ typedef struct personnage {
     int posY;
     int frameAnimation; // 4 frames , -5 = dégat, -10 = dcd
     int hp;
+    int hpMax;
     int xp;
+    int xpMax;
     int lvl;
+    int sword_damage;
+    int gun_damage;
+    int nbCoffres;
     int * inv;
     SDL_bool invulnerable;            // Indique si le joueur est invulnérable
     unsigned int invulnerable_timer;  // Timer d'invulnérabilité
@@ -32,11 +56,11 @@ typedef struct monstre {
     int hp;
     int xp;
     int loot;
-    int frameAnimation; // 4 frames , -5 = dégat, -10 = dcd
+    int type; // 1 = chuchu , 2 = creeper , 3 = sans
 } monstre;
 
 typedef struct special {
-    int type; // 1 = coffre; 2 = machine, 3 = grande machine, 4 = grande machine ( 1 clé a molette utilisée ), 5 = coffre ouvert, 6 = machine réparée, 7 = grande machine réparée
+    int type; // 1 = coffre; 2 = machine, 3 = grande machine, 4 = grande machine ( 1 clé a molette utilisée ), 5 = coffre ouvert, 6 = machine réparée, 7 = grande machine réparée, 8 = épée
     int inv; // la valeur de l'objet contenu dans le coffre ( 0 si machine )
 } special;
 

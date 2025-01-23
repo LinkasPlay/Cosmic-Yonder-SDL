@@ -187,67 +187,104 @@ int texture( int argc, char **argv) {
 			}
 			break;
         // case avec monstre
-        case 2:
-            image = SDL_LoadBMP("src/image/monstre.bmp");
-            if(image == NULL){
-		        SDL_DestroyRenderer(renderer);
-		        SDL_DestroyWindow(window);
-		        SDL_ExitWithError("Impossible de charger l'image d'un monstre");
-	    	}
+		case 2:
+			switch (contenuCase.mstr.type) {
+				case 1:
+					image = SDL_LoadBMP("src/image/monstreType1.bmp");
+					break;
+				case 2:
+					image = SDL_LoadBMP("src/image/monstreType2.bmp");
+					break;
+				case 3:
+					image = SDL_LoadBMP("src/image/monstreType3.bmp");
+					break;
+				case 4: // Boss
+					image = SDL_LoadBMP("src/image/monstreBoss.bmp");
+					break;
+				default:
+					SDL_DestroyRenderer(renderer);
+					SDL_DestroyWindow(window);
+					SDL_ExitWithError("Type de monstre invalide");
+					break;
+			}
+			if (image == NULL) {
+				SDL_DestroyRenderer(renderer);
+				SDL_DestroyWindow(window);
+				SDL_ExitWithError("Impossible de charger l'image du monstre");
+			}
 			break;
-        // case avec machine
-        case 3:
-            image = SDL_LoadBMP("src/image/machine.bmp");
-            if(image == NULL){
-		        SDL_DestroyRenderer(renderer);
-		        SDL_DestroyWindow(window);
-		        SDL_ExitWithError("Impossible de charger l'image d'une machine ");
-	   		}
-        	break;
-		default:
-			break;
-    }
 
-    //creeation texture
+		// case avec machine
+		case 3:
+			switch (contenuCase.spe.type) {
+				case 1:
+					image = SDL_LoadBMP("src/image/coffre.bmp");
+					break;
+				case 2:
+					image = SDL_LoadBMP("src/image/machine.bmp");
+					break;
+				case 3:
+					image = SDL_LoadBMP("src/image/grandeMachine.bmp");
+					break;
+				case 4:
+					image = SDL_LoadBMP("src/image/grandeMachineReparation.bmp");
+					break;
+				case 5:
+					image = SDL_LoadBMP("src/image/coffreOuvert.bmp");
+					break;
+				case 6:
+					image = SDL_LoadBMP("src/image/machineReparee.bmp");
+					break;
+				case 7:
+					image = SDL_LoadBMP("src/image/grandeMachineReparee.bmp");
+					break;
+				case 8:
+					image = SDL_LoadBMP("src/image/sword.bmp");
+					break;
+				default:
+					SDL_DestroyRenderer(renderer);
+					SDL_DestroyWindow(window);
+					SDL_ExitWithError("Type de machine invalide");
+					break;
+			}
+			if (image == NULL) {
+				SDL_DestroyRenderer(renderer);
+				SDL_DestroyWindow(window);
+				SDL_ExitWithError("Impossible de charger l'image de la machine");
+			}
+			break;
+	};
+    // Création de la texture
     texture = SDL_CreateTextureFromSurface(renderer, image);
-    SDL_FreeSurface(image);
-    if(texture == NULL){
-		SDL_DestroyRenderer(renderer);
-		SDL_DestroyWindow(window);
-		SDL_ExitWithError("Impossible de creer la texture");
-	}
+    SDL_FreeSurface(image);  // Libération de la surface après utilisation
+    if (texture == NULL) {
+        SDL_DestroyRenderer(renderer);
+        SDL_DestroyWindow(window);
+        SDL_ExitWithError("Impossible de créer la texture");
+    }
 
     extern SDL_Rect Case;
 
-    if(SDL_QueryTexture(texture, NULL, NULL, &Case.w, &Case.h) != 0){
-		SDL_DestroyRenderer(renderer);
-		SDL_DestroyWindow(window);
+    if (SDL_QueryTexture(texture, NULL, NULL, &Case.w, &Case.h) != 0) {
+        SDL_DestroyTexture(texture);  // Ajout de la libération de la texture
+        SDL_DestroyRenderer(renderer);
+        SDL_DestroyWindow(window);
         SDL_ExitWithError("Impossible de charger la texture");
     }
 
-    //rectangle.x = (WINDOW_WIDTH - rectangle.w) / 2;
-    //rectangle.y = (WINDOW_HEIGHT - rectangle.h) / 2;
+    // Affichage de la texture
+    if (SDL_RenderCopy(renderer, texture, NULL, &Case) != 0) {
+        SDL_DestroyTexture(texture);  // Ajout de la libération de la texture
+        SDL_DestroyRenderer(renderer);
+        SDL_DestroyWindow(window);
+        SDL_ExitWithError("Impossible d'afficher la texture");
+    }
 
-    if(SDL_RenderCopy(renderer, texture, NULL, &Case) != 0){
-		SDL_DestroyRenderer(renderer);
-		SDL_DestroyWindow(window);
-		SDL_ExitWithError("Impossible d'afficher la texture");
-	}
+    // Libération de la texture après affichage
+    SDL_DestroyTexture(texture);  // Très important pour éviter la fuite de mémoire
 
-	SDL_RenderPresent(renderer);
-	//SDL_Delay(5);
-
-    /*effacement rendu
-	if(SDL_RenderClear(renderer) != 0){
-		SDL_ExitWithError("Efffacement rendu echouee");
-	}
-
-	// fin programme / libération mémoire
-	SDL_DestroyRenderer(renderer);
-	SDL_DestroyWindow(window);
-	SDL_Quit();
-    */
-	return EXIT_SUCCESS;
+    SDL_RenderPresent(renderer);
+    return EXIT_SUCCESS;
 }
 
 //texture de l'ui

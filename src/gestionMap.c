@@ -66,9 +66,14 @@ int creeMap(void) {
     perso.direction = 3;
     perso.frameAnimation = 0;
     perso.hp = 3;
+    perso.hpMax = 3;
     perso.inv = inv;
     perso.lvl = 1;
     perso.xp = 0;
+    perso.xpMax = 90;
+    perso.sword_damage = 50; // Dégâts de base de l'épée
+    perso.gun_damage = 20;   // Dégâts de base du pistolet
+
 
     // Allocation de mémoire pour map
     map = malloc(sizeof(tile*) * DIMENSION_MAP);

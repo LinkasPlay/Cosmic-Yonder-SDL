@@ -10,7 +10,6 @@
 
 #include "CosmicYonder.h"
 
-
 #define OBJ_MAX 9
 
 #define LARGEUR_TAB 5
@@ -27,11 +26,11 @@ extern int mouvementGauche(void);
 extern int mouvementBas(void);
 extern int mouvementDroite(void);
 
-int porteLibre = 0;
+int epeePlacee = 0; // Indique si l'épée a été placée
+int porteLibre = 0; 
+int grandesMachinesPlacees = 0;
 extern personnage perso;
 extern personnage persoPast;
-
-// COMMANDE TERMINAL : gcc -o ProgMain *.c -lncurses -lm -lpthread -lpulse-simple -lpulse
 
 extern int graine;
 int entreeX;
@@ -39,11 +38,10 @@ int entreeY;
 
 extern salle room;
 
-void debug(const char *msg) {
-    printf("%s\n", msg);
+unsigned int aleatoire(int min, int max) {
+    // Générer une valeur pseudo-aléatoire dans l'intervalle [min, max]
+    return (rand() % (max - min + 1)) + min;
 }
-
-void ajouterSalle (void);
 
 void freeRoomCases(tile **cases, int largeur) {
     if (cases) {
@@ -54,32 +52,9 @@ void freeRoomCases(tile **cases, int largeur) {
     }
 }
 
-int actualiserMap(void) {
-    for (unsigned i = 0; i < DIMENSION_MAP; ++i) {
-        for (unsigned j = 0; j < DIMENSION_MAP; ++j) {
-            if (i == perso.posX && j == perso.posY) {
-                map[i][j].contenu = 1;
-            } else if (i == persoPast.posX && j == persoPast.posY) {
-                map[i][j].contenu = 0;
-            }
-        }
-    }
-
-    return EXIT_SUCCESS;
-}
-
-unsigned int aleatoire(int salle, int graine, int min, int max){
-    double rdn;
-    max++;
-
-    rdn = (cos(salle + graine) + 1) / 2; // Valeur entre 0 et 1
-    rdn = rdn * (max - min) + min; // Réajustement de la plage
-    return (unsigned int)rdn;
-}
+void ajouterSalle(void);
 
 int nouvelleSalle(int longueur, int largeur, int num_salle, int cote) {
-    char str[100];
-
     // Réinitialisation room
     room.num = 0;
     room.largeur = 0;
@@ -92,45 +67,38 @@ int nouvelleSalle(int longueur, int largeur, int num_salle, int cote) {
         room.cases = NULL;
     }
 
-    debug("1");
-
     // Génération de la nouvelle salle
     if (generation(longueur, largeur, num_salle, cote) != EXIT_SUCCESS) {
         printf("Erreur generation\n");
         return EXIT_FAILURE;
     }
 
-    debug("2");
-
     // Calcul de la position de la salle
     if (num_salle == 1) {
         room.posX = perso.posX - 2;
         room.posY = perso.posY - 2;
-    } 
-    else {
+    } else {
         switch (cote) {
             case 0: // Haut
-                room.posX = perso.posX - entreeX;
-                room.posY = perso.posY - longueur;
+                room.posX = perso.posX - largeur / 2; // Centrer la salle horizontalement par rapport au joueur
+                room.posY = perso.posY - longueur;    // Positionner la salle au-dessus
                 break;
             case 3: // Droite
-                room.posX = perso.posX + 1;
-                room.posY = perso.posY - entreeY;
+                room.posX = perso.posX + 1;           // Positionner la salle à droite
+                room.posY = perso.posY - longueur / 2; // Centrer la salle verticalement
                 break;
             case 2: // Bas
-                room.posX = perso.posX - entreeX;
-                room.posY = perso.posY + 1;
+                room.posX = perso.posX - largeur / 2; // Centrer la salle horizontalement
+                room.posY = perso.posY + 1;           // Positionner la salle en dessous
                 break;
             case 1: // Gauche  
-                room.posX = perso.posX - largeur;
-                room.posY = perso.posY - entreeY;
+                room.posX = perso.posX - largeur;     // Positionner la salle à gauche
+                room.posY = perso.posY - longueur / 2; // Centrer la salle verticalement
                 break;
             default:
                 break;
         }
     }
-    //sprintf(str, "cote /entreeX / Y: %d / %d|%d", cote, entreeX, entreeY);
-    debug(str);
 
     // Vérification des limites de la carte
     if (room.posX < 0 || room.posX + room.largeur >= DIMENSION_MAP || room.posY < 0 || room.posY + room.longueur >= DIMENSION_MAP) {
@@ -154,31 +122,101 @@ int nouvelleSalle(int longueur, int largeur, int num_salle, int cote) {
         }
     }
 
-    debug("4");
-
     // Ajout de la salle à la carte
     ajouterSalle();
     map[perso.posX][perso.posY].contenu = 1;
-    SDL_Log("Salle générée");
+
+    return EXIT_SUCCESS;
+}
+
+int verifierPlacementSalle(int longueur, int largeur, int posX, int posY) {
+    // Vérification des limites de la carte
+    if (posX < 0 || posY < 0 || posX + largeur > DIMENSION_MAP || posY + longueur > DIMENSION_MAP) {
+        return 0; // Emplacement invalide
+    }
+
+    // Vérification des collisions
+    for (int i = posX; i < posX + largeur; i++) {
+        for (int j = posY; j < posY + longueur; j++) {
+            // Si une case n'est ni un mur (-2) ni une porte (-1) ni vide (-5), il y a collision
+            if (map[i][j].contenu != -5 && map[i][j].contenu != -2 && map[i][j].contenu != -1) {
+                return 0;
+            }
+        }
+    }
+    return 1; // Emplacement valide
+}
+
+int genererSalleValide(int longueurInitiale, int largeurInitiale, int num_salle, int cote) {
+    int longueur = longueurInitiale;
+    int largeur = largeurInitiale;
+
+    for (int tentatives = 0; tentatives < 10; tentatives++) {
+        // Réduire les dimensions si nécessaire
+        if (tentatives > 0) {
+            longueur = (longueur > 5) ? longueur - 1 : 5;
+            largeur = (largeur > 5) ? largeur - 1 : 5;
+        }
+
+        int posX = 0;
+        int posY = 0;
+
+        // Calculer la position en fonction du cote
+        switch (cote) {
+            case 0: // Haut
+                posX = perso.posX - largeur / 2; // Centrer horizontalement
+                posY = perso.posY - longueur;    // Coller au mur du haut
+                break;
+            case 1: // Gauche
+                posX = perso.posX - largeur;     // Coller au mur de gauche
+                posY = perso.posY - longueur / 2; // Centrer verticalement
+                break;
+            case 2: // Bas
+                posX = perso.posX - largeur / 2; // Centrer horizontalement
+                posY = perso.posY + 1;           // Coller au mur du bas
+                break;
+            case 3: // Droite
+                posX = perso.posX + 1;           // Coller au mur de droite
+                posY = perso.posY - longueur / 2; // Centrer verticalement
+                break;
+            default:
+                printf("Cote invalide pour la generation de salle.\n");
+                return -1;
+        }
+
+        if (verifierPlacementSalle(longueur, largeur, posX, posY)) {
+            return nouvelleSalle(longueur, largeur, num_salle, cote);
+        }
+
+    }
+
+    return EXIT_FAILURE;
+}
+
+int actualiserMap(void) {
+    for (unsigned i = 0; i < DIMENSION_MAP; ++i) {
+        for (unsigned j = 0; j < DIMENSION_MAP; ++j) {
+            if (i == perso.posX && j == perso.posY) {
+                map[i][j].contenu = 1;
+            } else if (i == persoPast.posX && j == persoPast.posY) {
+                map[i][j].contenu = 0;
+            }
+        }
+    }
 
     return EXIT_SUCCESS;
 }
 
 int generation(int longueur, int largeur, int num_salle, int cote) {
     // Allocation de mémoire pour la salle
-    char str[100];
-
     tile **p = malloc(sizeof(tile *) * largeur);
     if (p == NULL) {
-        printf("Echec de l'allocation\n");
         return EXIT_FAILURE;
     }
 
     for (int i = 0; i < largeur; i++) {
         p[i] = malloc(sizeof(tile) * longueur);
         if (p[i] == NULL) {
-            printf("Echec de l'allocation\n");
-            // Libération de la mémoire allouée
             for (int j = 0; j < i; j++) {
                 free(p[j]);
             }
@@ -194,7 +232,7 @@ int generation(int longueur, int largeur, int num_salle, int cote) {
             p[i][j].mstr.hp = 0;
             p[i][j].mstr.xp = 0;
             p[i][j].mstr.loot = 0;
-            p[i][j].mstr.frameAnimation = 0;
+            p[i][j].mstr.type = 0;
             p[i][j].spe.type = 0;
             p[i][j].spe.inv = 0;
         }
@@ -206,27 +244,29 @@ int generation(int longueur, int largeur, int num_salle, int cote) {
 
     // Si c'est la première salle, positionner les portes au centre des murs
     if (num_salle == 1) {
-        portes[0] = 1;
-        portes[1] = 1;
-        portes[2] = 1;
-        portes[3] = 1;
+        portes[0] = 1; // Haut
+        portes[1] = 1; // Gauche
+        portes[2] = 1; // Bas
+        portes[3] = 1; // Droite
     } else {
         portes[cote] = 1; // Activer la porte du côté spécifié
 
+        // Générer des portes aléatoires supplémentaires (60 % de chance), sauf du côté où se trouve le joueur
         for (int i = 0; i < 4; i++) {
-            if (portes[i] == 0 && aleatoire(num_salle, i, 1, 100) <= 60) {
+            if (portes[i] == 0 && i != cote && aleatoire(1, 100) <= 60) {
                 portes[i] = 1;
                 porteLibre++;
             }
         }
     }
 
+    // Placement des portes
     for (int i = 0; i < 4; i++) {
         if (portes[i] == 1) {
             int al;
             switch (i) {
                 case 0: // Porte haut
-                    al = (num_salle == 1) ? longueur / 2 : aleatoire(num_salle, i, 1, longueur - 2);
+                    al = (num_salle == 1) ? longueur / 2 : aleatoire(1, longueur - 2);
                     p[0][al].contenu = -1;
                     if (i == cote) {
                         entreeX = al;
@@ -234,7 +274,7 @@ int generation(int longueur, int largeur, int num_salle, int cote) {
                     }
                     break;
                 case 1: // Porte gauche
-                    al = (num_salle == 1) ? largeur / 2 : aleatoire(num_salle, i, 1, largeur - 2);
+                    al = (num_salle == 1) ? largeur / 2 : aleatoire(1, largeur - 2);
                     p[al][0].contenu = -1;
                     if (i == cote) {
                         entreeX = 0;
@@ -242,7 +282,7 @@ int generation(int longueur, int largeur, int num_salle, int cote) {
                     }
                     break;
                 case 2: // Porte bas
-                    al = (num_salle == 1) ? longueur / 2 : aleatoire(num_salle, i, 1, longueur - 2);
+                    al = (num_salle == 1) ? longueur / 2 : aleatoire(1, longueur - 2);
                     p[largeur - 1][al].contenu = -1;
                     if (i == cote) {
                         entreeX = al;
@@ -250,7 +290,7 @@ int generation(int longueur, int largeur, int num_salle, int cote) {
                     }
                     break;
                 case 3: // Porte droite
-                    al = (num_salle == 1) ? largeur / 2 : aleatoire(num_salle, i, 1, largeur - 2);
+                    al = (num_salle == 1) ? largeur / 2 : aleatoire(1, largeur - 2);
                     p[al][longueur - 1].contenu = -1;
                     if (i == cote) {
                         entreeX = largeur - 1;
@@ -263,49 +303,80 @@ int generation(int longueur, int largeur, int num_salle, int cote) {
         }
     }
 
+    // Remplissage de la salle avec des monstres et des objets spéciaux
     int obj = 0;
     for (int i = 0; i < largeur; i++) {
         for (int j = 0; j < longueur; j++) {
             if (j == 0 || j == longueur - 1 || i == 0 || i == largeur - 1) {
                 if (p[i][j].contenu != -1) {
-                    p[i][j].contenu = -2;
+                    p[i][j].contenu = -2; // Mur
                 }
             } else if (num_salle == 1) {
-                p[2][2].contenu = 1;
-            } else if (obj < ((longueur - 2) * (largeur - 2)) / OBJ_MAX) {
-                if (aleatoire(num_salle, i * j, 1, 100) <= 40) {
-                    int al = aleatoire(num_salle, i * j, 1, 10);
-                    if (al <= 3) {
+                p[2][2].contenu = 1; // Contenu de la première salle
+            } else if (aleatoire(1, 100) <= 40) { // 40% de chance de générer un objet ou un monstre
+                if (obj < ((longueur - 2) * (largeur - 2)) / OBJ_MAX) {
+                    int proba = aleatoire(1, 100); // Générer un nombre entre 1 et 100
+                    if (proba <= 40) {
+                        // Monstre type 1 (40 %)
                         p[i][j].contenu = 2;
                         p[i][j].mstr.hp = 80;
                         p[i][j].mstr.xp = 10;
-                    } else if (al <= 5) {
+                        p[i][j].mstr.type = 1;
+                    } else if (proba <= 60) {
+                        // Monstre type 2 (20 %)
                         p[i][j].contenu = 2;
                         p[i][j].mstr.hp = 180;
                         p[i][j].mstr.xp = 20;
-                    } else if (al == 6) {
+                        p[i][j].mstr.type = 2;
+                    } else if (proba <= 70) {
+                        // Monstre type 3 (10 %)
                         p[i][j].contenu = 2;
                         p[i][j].mstr.hp = 260;
                         p[i][j].mstr.xp = 30;
-                    } else if (al <= 8) {
-                        p[i][j].contenu = 3;
-                        p[i][j].spe.type = 2;
-                    } else if (al == 9) {
-                        p[i][j].contenu = 3;
-                        p[i][j].spe.type = 3;
-                    } else {
+                        p[i][j].mstr.type = 3;
+                    } else if (proba <= 90) {
+                        // Coffre (20 %)
                         p[i][j].contenu = 3;
                         p[i][j].spe.type = 1;
+                    } else {
+                        // Machine (10 %)
+                        if (grandesMachinesPlacees < 3 && aleatoire(1, 100) <= 10) { // 10 % de chance de grande machine
+                            p[i][j].contenu = 3;
+                            p[i][j].spe.type = 3; // Grande machine
+                            grandesMachinesPlacees++;
+                        } else {
+                            p[i][j].contenu = 2;
+                            p[i][j].mstr.hp = 260;
+                            p[i][j].mstr.xp = 30;
+                            p[i][j].mstr.type = 3; // Remplacer par un monstre type 3
+                        }
                     }
                     obj++;
                 }
+            } else if (!epeePlacee && num_salle != 1 && (aleatoire(1, 100) <= 5)) { // 5 % de chance pour l'épée
+                p[i][j].contenu = 3;
+                p[i][j].spe.type = 8; // Contenu pour l'épée
+                epeePlacee = 1; // Marquer que l'épée a été placée
             }
         }
     }
 
-    //sprintf(str, "cote /entreeX / Y: %d / %d|%d", cote, entreeX, entreeY);
-    debug(str);
+    // Si l'épée n'est pas encore placée, forcer son placement en salle 6
+    if (!epeePlacee && num_salle == 6) {
+        for (int i = 1; i < largeur - 1; i++) {
+            for (int j = 1; j < longueur - 1; j++) {
+                if (p[i][j].contenu == 0) {
+                    p[i][j].contenu = 3;
+                    p[i][j].spe.type = 8; // Contenu pour l'épée
+                    epeePlacee = 1;
+                    break;
+                }
+            }
+            if (epeePlacee) break;
+        }
+    }
 
+    // Sauvegarde des informations de la salle
     room.num = num_salle;
     room.largeur = largeur;
     room.longueur = longueur;
@@ -314,31 +385,29 @@ int generation(int longueur, int largeur, int num_salle, int cote) {
     return EXIT_SUCCESS;
 }
 
-
 void ajouterSalle(void) {
     int n = 0, m = 0;
-    char str[100];
-    //sprintf(str, "Ajout de la salle: %d, %d | %d, %d", room.posX, room.posX + room.largeur, room.posY, room.posY + room.longueur);
-    debug(str);
 
     for (unsigned int i = room.posX; i < room.posX + room.largeur; i++) {
         for (unsigned int j = room.posY; j < room.posY + room.longueur; j++) {
             if (i >= DIMENSION_MAP || j >= DIMENSION_MAP) {
-                //sprintf(str, "Accès hors limites: %d, %d", i, j);
-                //debug(str);
                 continue; // Ne pas accéder à la mémoire hors limites
             }
 
+            // Transformation conditionnelle : si map[i][j] est un mur (-2) et room.cases[n][m] est une porte (-1), ne rien faire
+            if (map[i][j].contenu == -2 && room.cases[n][m].contenu == -1) {
+                m++;
+                continue;
+            }
+
+            // Sinon, copier les données de room.cases dans map
             map[i][j].contenu = room.cases[n][m].contenu;
             map[i][j].mstr.hp = room.cases[n][m].mstr.hp;
             map[i][j].mstr.xp = room.cases[n][m].mstr.xp;
             map[i][j].mstr.loot = room.cases[n][m].mstr.loot;
-            map[i][j].mstr.frameAnimation = room.cases[n][m].mstr.frameAnimation;
+            map[i][j].mstr.type = room.cases[n][m].mstr.type;
             map[i][j].spe.type = room.cases[n][m].spe.type;
             map[i][j].spe.inv = room.cases[n][m].spe.inv;
-
-            //sprintf(str, "Copie de la salle: %d, %d | %d, %d", i, j, map[i][j].contenu, room.cases[n][m].contenu);
-            //debug(str);
 
             m++;
         }

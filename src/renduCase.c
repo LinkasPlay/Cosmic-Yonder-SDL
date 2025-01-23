@@ -39,6 +39,7 @@ extern int mouvementGauche(void);
 extern int mouvementBas(void);
 extern int mouvementDroite(void);
 extern int attaqueEpee(void);
+extern void gameOver();
 
 extern int texture( int argc, char **argv);
 extern int creeMap(void);
@@ -48,6 +49,14 @@ extern int nouvelleSalle(int longueur, int largeur, int num_salle, int cote);
 extern salle room;
 
 extern void lancerBoucleDeJeu(int argc, char **argv);
+extern unsigned int timer_start;
+extern unsigned int start_time;
+extern int machineFuite;
+
+extern char inventaireIcons[7][64];
+
+TTF_Font *fontUI = NULL;
+extern Mix_Music *musique_acceleree;
 
 int graine = -1;  // Graine non initialisée
 
@@ -83,7 +92,6 @@ int jeu(int argc, char **argv) {
         SDL_Log("Erreur lors de la création du texte : %s\n", TTF_GetError());
         return EXIT_FAILURE;
     }
-    SDL_Log("Texte 'Entrez la graine :' créé avec succès");
 
     // Créer une texture à partir du texte
     SDL_Texture *textTexture = SDL_CreateTextureFromSurface(renderer, textSurface);
@@ -93,7 +101,6 @@ int jeu(int argc, char **argv) {
         SDL_Log("Erreur lors de la création de la texture pour le texte : %s\n", SDL_GetError());
         return EXIT_FAILURE;
     }
-    SDL_Log("Texture pour le texte créée avec succès");
 
     // Récupérer la taille du texte pour l'afficher au centre
     int text_width = 0, text_height = 0;
@@ -112,8 +119,6 @@ int jeu(int argc, char **argv) {
     inputRect.y = textRect.y + textRect.h + 20;  // En dessous du texte
     inputRect.w = 200;      // Largeur initiale, ajustée dynamiquement
     inputRect.h = 50;                    // Hauteur de l'encadré de saisie
-
-    SDL_Log("Saisie de la graine...");
 
     // Boucle pour capturer l'entrée de la graine
     while (entrer_graine) {
@@ -137,7 +142,6 @@ int jeu(int argc, char **argv) {
                     // Appuyer sur Entrée pour confirmer la graine seulement si un nombre a été saisi
                     else if ((event.key.keysym.sym == SDLK_RETURN || event.key.keysym.sym == SDLK_KP_ENTER) && input_pos > 0) {
                         entrer_graine = SDL_FALSE;
-                        SDL_Log("Entrée de la graine validée : %s", input);
                     }
                     break;
             }
@@ -192,8 +196,6 @@ int jeu(int argc, char **argv) {
         return EXIT_FAILURE;
     }
 
-    SDL_Log("Message de validation affiché");
-
     // Afficher ce texte au centre
     SDL_Rect validationRect;
     validationRect.x = (WINDOW_WIDTH - text_width) / 2;  // Centrer horizontalement
@@ -212,7 +214,6 @@ int jeu(int argc, char **argv) {
 
     // Convertir l'entrée utilisateur en nombre pour la graine
     graine = atoi(input);  // Conversion de l'entrée en entier
-    SDL_Log("Graine : %d", graine);
 
     // Initialiser la graine aléatoire
     srand(graine);
@@ -226,8 +227,6 @@ int jeu(int argc, char **argv) {
         return EXIT_FAILURE;
     }
 
-    SDL_Log("Map générée avec succès");
-
     // Nettoyage des textures
     SDL_DestroyTexture(textTexture);
     SDL_DestroyTexture(validationTexture);
@@ -240,6 +239,163 @@ int jeu(int argc, char **argv) {
     lancerBoucleDeJeu(argc,argv);  // Assurez-vous que cette fonction est bien définie
 
     return EXIT_SUCCESS;
+}
+
+void afficherInterface(SDL_Renderer *renderer, TTF_Font *font, int selectedSlot) {
+    SDL_Surface *image = NULL;
+    SDL_Texture *texture = NULL;
+    SDL_Rect uiRect;
+
+    // --- Effacer l'ancien affichage du Timer ---
+    SDL_Rect timerEraseRect = {WINDOW_WIDTH - 100, 20, 80, 40};
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);  // Noir
+    SDL_RenderFillRect(renderer, &timerEraseRect);  // Effacer l'ancien timer
+
+    // --- Effacer l'ancien affichage de la graine ---
+    SDL_Rect graineEraseRect = {WINDOW_WIDTH - 150, 70, 140, 30};
+    SDL_RenderFillRect(renderer, &graineEraseRect);  // Effacer l'ancien texte de la graine
+
+    // --- Effacer l'ancien affichage de l'inventaire ---
+    int nbCases = 7;  // Nombre de cases dans l'inventaire
+    int caseSize = 64;  // Taille d'une case
+    int startX = (WINDOW_WIDTH - (nbCases * caseSize)) / 2;  // Centrer l'inventaire
+    SDL_Rect inventaireEraseRect = {startX, WINDOW_HEIGHT - 100, nbCases * (caseSize + 10), caseSize};
+    SDL_RenderFillRect(renderer, &inventaireEraseRect);  // Effacer l'inventaire
+
+    // --- Effacer l'ancien affichage du niveau et XP ---
+    SDL_Rect xpEraseRect = {20, 70, 200, 30};
+    SDL_RenderFillRect(renderer, &xpEraseRect);  // Effacer l'affichage du niveau et XP
+
+    // --- Affichage des points de vie (HP) ---
+    for (int i = 0; i < perso.hpMax; i++) {
+        if (i < perso.hp) {
+            image = SDL_LoadBMP("src/image/hp.bmp");  // Coeur plein
+        } else {
+            image = SDL_LoadBMP("src/image/nhp.bmp");  // Coeur vide
+        }
+
+        if (!image) {
+            SDL_Log("Erreur de chargement de l'image de coeur : %s", SDL_GetError());
+            return;
+        }
+
+        texture = SDL_CreateTextureFromSurface(renderer, image);
+        SDL_FreeSurface(image);
+
+        uiRect.x = 20 + i * 40;
+        uiRect.y = 20;
+        uiRect.w = 32;
+        uiRect.h = 32;
+
+        SDL_RenderCopy(renderer, texture, NULL, &uiRect);
+        SDL_DestroyTexture(texture);
+    }
+
+    // --- Affichage du niveau et XP ---
+    char xpText[100];
+    sprintf(xpText, "Niveau %d : XP %d/%d", perso.lvl, perso.xp, (int)(100 * (perso.lvl * 0.9)));
+    SDL_Surface *xpSurface = TTF_RenderText_Solid(font, xpText, (SDL_Color){255, 255, 255, 255});
+    SDL_Texture *xpTexture = SDL_CreateTextureFromSurface(renderer, xpSurface);
+    SDL_FreeSurface(xpSurface);
+    
+    uiRect.x = 20;
+    uiRect.y = 70;
+    uiRect.w = 200;
+    uiRect.h = 30;
+    SDL_RenderCopy(renderer, xpTexture, NULL, &uiRect);
+    SDL_DestroyTexture(xpTexture);
+
+    // --- Affichage du Timer ---
+    unsigned int elapsed_time = SDL_GetTicks() - start_time;
+    unsigned int remaining_time = (timer_start > elapsed_time) ? timer_start - elapsed_time : 0;
+
+    if (remaining_time == 0) {
+        gameOver();
+        return;
+    }
+
+    char timerText[10];
+    int minutes = remaining_time / 60000;
+    int seconds = (remaining_time % 60000) / 1000;
+    sprintf(timerText, "%02d:%02d", minutes, seconds);
+
+    SDL_Surface *timerSurface = TTF_RenderText_Solid(font, timerText, (SDL_Color){255, 255, 255, 255});
+    SDL_Texture *timerTexture = SDL_CreateTextureFromSurface(renderer, timerSurface);
+    SDL_FreeSurface(timerSurface);
+
+    uiRect.x = WINDOW_WIDTH - 100;
+    uiRect.y = 20;
+    uiRect.w = 80;
+    uiRect.h = 40;
+    SDL_RenderCopy(renderer, timerTexture, NULL, &uiRect);
+    SDL_DestroyTexture(timerTexture);
+
+    // --- Affichage de la graine ---
+    char graineText[50];
+    sprintf(graineText, "Graine : %d", graine);
+    SDL_Surface *graineSurface = TTF_RenderText_Solid(font, graineText, (SDL_Color){255, 255, 255, 255});
+    SDL_Texture *graineTexture = SDL_CreateTextureFromSurface(renderer, graineSurface);
+    SDL_FreeSurface(graineSurface);
+
+    uiRect.x = WINDOW_WIDTH - 150;
+    uiRect.y = 70;
+    uiRect.w = 140;
+    uiRect.h = 30;
+    SDL_RenderCopy(renderer, graineTexture, NULL, &uiRect);
+    SDL_DestroyTexture(graineTexture);
+
+    // --- Affichage du nombre de grandes machines réparées (en bas de l'écran) ---
+    char machineText[50];
+    sprintf(machineText, "Grandes machines : %d", machineFuite);
+    SDL_Surface *machineSurface = TTF_RenderText_Solid(font, machineText, (SDL_Color){255, 255, 255, 255});
+    SDL_Texture *machineTexture = SDL_CreateTextureFromSurface(renderer, machineSurface);
+    SDL_FreeSurface(machineSurface);
+
+    uiRect.x = WINDOW_WIDTH - 200;
+    uiRect.y = WINDOW_HEIGHT - 50;  // Position en bas de l'écran
+    uiRect.w = 190;
+    uiRect.h = 30;
+    SDL_RenderCopy(renderer, machineTexture, NULL, &uiRect);
+    SDL_DestroyTexture(machineTexture);
+
+    // --- Affichage de l'inventaire ---
+    for (int i = 0; i < nbCases; i++) {
+        // Charger l'icône correspondant à l'inventaire
+        image = SDL_LoadBMP(inventaireIcons[i]);
+        if (!image) {
+            SDL_Log("Erreur de chargement de l'image d'inventaire pour l'emplacement %d : %s", i, SDL_GetError());
+            return;
+        }
+        texture = SDL_CreateTextureFromSurface(renderer, image);
+        SDL_FreeSurface(image);
+
+        // Définir la position et la taille de la case d'inventaire
+        uiRect.x = startX + i * (caseSize + 10);
+        uiRect.y = WINDOW_HEIGHT - 100;
+        uiRect.w = caseSize;
+        uiRect.h = caseSize;
+
+        SDL_RenderCopy(renderer, texture, NULL, &uiRect);
+        SDL_DestroyTexture(texture);
+
+        // Affichage de la flèche de sélection
+        if (i == selectedSlot) {
+            SDL_Surface *arrowSurface = SDL_LoadBMP("src/image/fleche.bmp");
+            SDL_Texture *arrowTexture = SDL_CreateTextureFromSurface(renderer, arrowSurface);
+            SDL_FreeSurface(arrowSurface);
+
+            SDL_Rect arrowRect;
+            arrowRect.x = uiRect.x + (caseSize / 2) - 16;
+            arrowRect.y = uiRect.y + caseSize + 5;
+            arrowRect.w = 32;
+            arrowRect.h = 32;
+
+            SDL_RenderCopy(renderer, arrowTexture, NULL, &arrowRect);
+            SDL_DestroyTexture(arrowTexture);
+        }
+    }
+
+    SDL_RenderPresent(renderer);  // Mise à jour de l'interface
 }
 
 // afficher les images de la camera
