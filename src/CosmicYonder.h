@@ -6,6 +6,8 @@
 #define WINDOW_HEIGHT 900
 #define FPS_LIMIT 16
 
+#define BOSSSHP 5000
+
 // Définition des canaux audio spécifiques
 #define CHANNEL_MENU 0
 #define CHANNEL_MOVE 1
@@ -24,6 +26,9 @@
 #define CHANNEL_BIG_KEY 14
 #define CHANNEL_FAIL 15
 #define CHANNEL_SWORD_PICKUP 16
+#define CHANNEL_ITEM 17
+#define CHANNEL_BRAK 18
+#define CHANNEL_BOSS_HURT 19
 
 extern void SDL_ExitWithError(const char *message);
 extern int texture( int argc, char **argv);
@@ -33,6 +38,32 @@ SDL_Window *window = NULL;
 SDL_Renderer *renderer = NULL;
 SDL_Rect Case;
 */
+
+typedef struct boss {
+    int hp;                // Points de vie du boss
+    int max_hp;            // Points de vie maximum
+    int x;                 // Coordonnée X du morceau principal (milieu haut)
+    int y;                 // Coordonnée Y du morceau principal (milieu haut)
+    SDL_bool invulnerable; // Indique si le boss est invulnérable
+    unsigned int invuln_timer; // Timer pour la période d'invulnérabilité
+} Boss;
+
+typedef struct sauvegarde {
+    int posX, posY;
+    int direction;
+    int hp, hpMax;
+    int xp, lvl;
+    int inv[7];  // Inventaire
+    int machineFuite;
+    unsigned int timer;
+    int map[DIMENSION_MAP][DIMENSION_MAP]; // État de la carte
+    int cameraX;
+    int cameraY; // Position de la caméra
+    int graine; // Graine de la partie
+    int nbCoffres; // Nombre de coffres ouverts
+    int nbSalles; // Nombre de salles générées
+} Sauvegarde;
+
 
 typedef struct personnage {
     int direction; //haut = 1, gauche = 2, bas = 3, droite = 4
@@ -55,8 +86,8 @@ typedef struct personnage {
 typedef struct monstre {
     int hp;
     int xp;
-    int loot;
-    int type; // 1 = chuchu , 2 = creeper , 3 = sans
+    int morceau;
+    int type; // 1 = chuchu , 2 = creeper , 3 = sans, 4 = boss
 } monstre;
 
 typedef struct special {
@@ -65,7 +96,7 @@ typedef struct special {
 } special;
 
 typedef struct tile {
-    int contenu; // -5 = vide, -2 = mur, -1 = porte, 0 = sol, 1 = personnage, 2 = monstre, 3 = coffre / machine
+    int contenu; // -5 = vide, -2 = mur, -1 = porte, 0 = sol, 1 = personnage, 2 = monstre, 3 = coffre / machine, 4 = porte de boss
     monstre mstr;
     special spe; // .type signifie le cote si porte (0 = haut, 1 = gauche, 2 = bas, 3 = droite)
 } tile;

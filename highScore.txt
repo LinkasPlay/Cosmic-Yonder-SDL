@@ -1,0 +1,3 @@
+Total etoiles: 11
+Derniere graine: 66
+Etoiles max: 3

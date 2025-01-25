@@ -4,21 +4,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
 #include <time.h>
 
 #include "CosmicYonder.h"
-
-/*
-	Windows : gcc src\*.c -o bin\progMain.exe -I include -L lib -lmingw32 -lSDL2main -lSDL2 -mwindows
-	Linux : gcc renduCase.c $(sdl2-config __cflags --libs) -o progRenduCase
-
-	Flags render
-	SDL_RENDERER_SOFTWARE
-	SDL_RENDERER_ACCELERATED
-	SDL_RENDERER_PRESENTVSYNC
-	SDL_RENDERER_TARGETTEXTURE
-*/
 
 /*
 Expliquation gameplay du jeu :
@@ -45,8 +35,8 @@ Expliquation gameplay du jeu :
 
     il y a quatre type de monstres :
         niv 1 : 80 pv, 10 xp
-        niv 2 : 180 pv, 20 xp | drop : clé * 0.05
-        niv 3 : 260 pv, 30 xp | drop : clé * 0.1, clé a molette * 0.1
+        niv 2 : 180 pv, 20 xp | drop : clé * 0.1
+        niv 3 : 260 pv, 30 xp | drop : clé * 0.2, clé a molette * 0.1
         niv 5 (boss) : 1000 pv, 0 xp => fin du jeu
 
 */
@@ -68,6 +58,8 @@ extern Mix_Chunk *sonKey;
 extern Mix_Chunk *sonBigKey;
 extern Mix_Chunk *sonFail;
 extern Mix_Chunk *sonSwordPickup;
+extern Mix_Chunk *sonItem;
+extern Mix_Chunk *mobBossSound;
 
 extern TTF_Font *fontUI;
 
@@ -81,15 +73,16 @@ extern int Ycamera;
 char inventaireIcons[7][64] = {
     "src/image/inventaireVide.bmp", // Par défaut, emplacement 1 est vide
     "src/image/inventaireVide.bmp", // Emplacement 2
-    "src/image/inventairePotion.bmp", // Emplacement 3
-    "src/image/inventaireXp.bmp", // Emplacement 4
-    "src/image/inventaireWrench.bmp", // Emplacement 5
-    "src/image/inventaireKey.bmp", // Emplacement 6
-    "src/image/inventaireBossKey.bmp" // Emplacement 7
+    "src/image/inventaireVide.bmp", // Emplacement 3
+    "src/image/inventaireVide.bmp", // Emplacement 4
+    "src/image/inventaireVide.bmp", // Emplacement 5
+    "src/image/inventaireVide.bmp", // Emplacement 6
+    "src/image/inventaireVide.bmp" // Emplacement 7
 };
 
 personnage perso;
 personnage persoPast;
+Boss boss;
 
 extern int texture(int argc, char **argv);
 extern int creeMap(void);
@@ -99,7 +92,9 @@ extern int genererSalleValide(int longueurInitiale, int largeurInitiale, int num
 extern unsigned int aleatoire(int min, int max);
 extern void save_game(const char *filename);
 extern int camera(int argc, char **argv);
+extern int genererSalleBoss(int cote);
 void afficherInterface(SDL_Renderer *renderer, TTF_Font *font, int selectedSlot);
+extern void credits();
 
 extern void SDL_LimitFPS(unsigned int limit);
 
@@ -111,6 +106,10 @@ unsigned int start_time = 0;
 int caseSize = 64;  // Taille d'une case
 int startX = (WINDOW_WIDTH - (7 * 64)) / 2;  // Centrer l'inventaire
 int machineFuite = 0;
+int quotaPistolet = 10;
+int quotaBoss = 30;
+
+SDL_bool bossPresent = SDL_FALSE;
 
 void gameOver() {
     extern SDL_Renderer *renderer;
@@ -194,19 +193,16 @@ void lvlMaj(monstre mstr) {
 
             // Buffs progressifs
             if (perso.lvl % 5 == 0) { // Tous les 5 niveaux
-                perso.sword_damage += 10; // Augmente les dégâts de l'épée
-                perso.gun_damage += 5;    // Augmente les dégâts du pistolet
+                perso.sword_damage += 20; // Augmente les dégâts de l'épée
+                perso.gun_damage += 10;    // Augmente les dégâts du pistolet
             }
             if (perso.lvl % 10 == 0) { // Tous les 10 niveaux
                 perso.hpMax += 1;      // Ajoute 1 PV max au joueur
                 perso.hp = perso.hpMax; // Remplit les PV actuels
             }
             if (perso.lvl % 2 == 0) { // Tous les 2 niveaux
-                perso.inv[2]++; // Ajoute une potion d'XP comme bonus
-                perso.inv[3]++; // Ajoute une potion d'XP comme bonus
-                perso.inv[4]++; // Ajoute une potion d'XP comme bonus
-                perso.inv[5]++; // Ajoute une potion d'XP comme bonus
-                perso.inv[6]++; // Ajoute une potion d'XP comme bonus
+                perso.inv[5]++; // Ajoute une clé comme bonus
+                strcpy(inventaireIcons[5], "src/image/inventaireKey.bmp");
             }
 
             // Stopper l'XP au niveau 20
@@ -224,6 +220,87 @@ void lvlMaj(monstre mstr) {
     } else {
         SDL_Log("Niveau maximum atteint, XP non ajoutée.");
     }
+}
+
+void verifierInvulnerabiliteBoss() {
+    if (boss.invulnerable && (SDL_GetTicks() - boss.invuln_timer >= 500)) {
+        boss.invulnerable = SDL_FALSE;
+    }
+}
+
+int degatBoss(int dmg) {
+    verifierInvulnerabiliteBoss();
+    if (boss.invulnerable) {
+        return 0;
+    }
+
+    boss.hp -= dmg;
+
+    // Jouer le son de dégâts du boss
+    Mix_PlayChannel(CHANNEL_BOSS_HURT, mobBossSound, 0);
+
+    // Activer l'invulnérabilité temporaire
+    boss.invulnerable = SDL_TRUE;
+    boss.invuln_timer = SDL_GetTicks();
+
+    // Si les points de vie du boss tombent à 0 ou en dessous
+    if (boss.hp <= 0) {
+        boss.hp = 0;
+        bossPresent = SDL_FALSE;
+
+        // Lancer les crédits
+        Mix_HaltMusic(); // Arrêter la musique actuelle
+        credits(); // Implémentez cette fonction ultérieurement
+    }
+
+    return 0;
+}
+
+int degatMonstre(int dmg, monstre *mstr) {
+    // Gestion spéciale pour le boss (type 4)
+    if (mstr->type == 4) {
+        return degatBoss(dmg); // Déléguer à la fonction `degatBoss`
+    } else {
+
+        // Gestion classique pour les autres monstres
+        mstr->hp -= dmg; // Réduire les points de vie du monstre
+        if (mstr->hp > 0) {
+            // Le monstre est encore vivant
+            Mix_PlayChannel(CHANNEL_MONSTER_HURT, mobHurtSound1, 0); // Jouer le son des dégâts subis par le monstre
+        } else {
+            // Monstre tué
+            if (! bossPresent) {
+                lvlMaj(*mstr); // Gérer le gain d'XP et autres récompenses liées au niveau
+
+                // Probabilité de loot
+                int proba = aleatoire(1, 100);
+                if (mstr->type == 2 && proba <= 20) {
+                    // Type 2 : 20% de chance de dropper une clé
+                    perso.inv[5]++;
+                    strcpy(inventaireIcons[5], "src/image/inventaireKey.bmp");
+                    Mix_PlayChannel(CHANNEL_ITEM, sonItem, 0); // Son pour recevoir un loot
+                } else if (mstr->type == 3) {
+                    if (proba <= 30) {
+                        // Type 3 : 30% de chance de dropper une clé
+                        perso.inv[5]++;
+                        strcpy(inventaireIcons[5], "src/image/inventaireKey.bmp");
+                        Mix_PlayChannel(CHANNEL_ITEM, sonItem, 0); // Son pour recevoir un loot
+                    } else if (proba <= 40) {
+                        // Type 3 : 10% de chance de dropper une clé à molette
+                        perso.inv[4]++;
+                        strcpy(inventaireIcons[4], "src/image/inventaireWrench.bmp");
+                        Mix_PlayChannel(CHANNEL_ITEM, sonItem, 0); // Son pour recevoir un loot
+                    }
+                }
+
+                
+            }
+            // Jouer le son de la mort du monstre
+            Mix_PlayChannel(-1, mobDeadSound1, 0);
+            return 0;
+        }
+    } 
+    return 0;
 }
 
 int attaquePistolet() {
@@ -247,15 +324,9 @@ int attaquePistolet() {
         if (map[x][y].contenu == -2) break; // Mur
 
         if (map[x][y].contenu == 2) { // Monstre
-            map[x][y].mstr.hp -= perso.gun_damage;
-
+            degatMonstre(perso.gun_damage, &(map[x][y].mstr)); // Call degatMonstre
             if (map[x][y].mstr.hp <= 0) {
-                // Monstre tué
-                lvlMaj(map[x][y].mstr);
-                map[x][y].contenu = 0;  // Vider la case
-                Mix_PlayChannel(CHANNEL_MONSTER_DEAD, mobDeadSound1, 0);
-            } else {
-                Mix_PlayChannel(CHANNEL_MONSTER_HURT, mobHurtSound1, 0);
+                map[x][y].contenu = 0;  // Vider la case si le monstre est mort
             }
             break; // Arrêter le tir après avoir touché un monstre
         }
@@ -268,93 +339,78 @@ int attaquePistolet() {
 }
 
 int attaqueEpee() {
-    // Jouer le son de l'épée sur le canal dédié
     Mix_PlayChannel(CHANNEL_SWORD, swordSound, 0);
 
     // Définir les directions d'attaque en fonction de l'orientation du joueur
     int directions[5][2];
     switch (perso.direction) {
         case 1: // Haut
-            directions[0][0] = -1; directions[0][1] = 0;   // Gauche
-            directions[1][0] = -1; directions[1][1] = -1;  // Devant à gauche
-            directions[2][0] = 0;  directions[2][1] = -1;  // Devant
-            directions[3][0] = 1;  directions[3][1] = -1;  // Devant à droite
-            directions[4][0] = 1;  directions[4][1] = 0;   // Droite
+            directions[0][0] = -1; directions[0][1] = 0;
+            directions[1][0] = -1; directions[1][1] = -1;
+            directions[2][0] = 0;  directions[2][1] = -1;
+            directions[3][0] = 1;  directions[3][1] = -1;
+            directions[4][0] = 1;  directions[4][1] = 0;
             break;
         case 3: // Bas
-            directions[0][0] = -1; directions[0][1] = 0;   
-            directions[1][0] = -1; directions[1][1] = 1;   
-            directions[2][0] = 0;  directions[2][1] = 1;   
-            directions[3][0] = 1;  directions[3][1] = 1;   
-            directions[4][0] = 1;  directions[4][1] = 0;   
+            directions[0][0] = -1; directions[0][1] = 0;
+            directions[1][0] = -1; directions[1][1] = 1;
+            directions[2][0] = 0;  directions[2][1] = 1;
+            directions[3][0] = 1;  directions[3][1] = 1;
+            directions[4][0] = 1;  directions[4][1] = 0;
             break;
         case 2: // Gauche
-            directions[0][0] = 0;  directions[0][1] = -1;  
-            directions[1][0] = -1; directions[1][1] = -1;  
-            directions[2][0] = -1; directions[2][1] = 0;   
-            directions[3][0] = -1; directions[3][1] = 1;   
-            directions[4][0] = 0;  directions[4][1] = 1;   
+            directions[0][0] = 0;  directions[0][1] = -1;
+            directions[1][0] = -1; directions[1][1] = -1;
+            directions[2][0] = -1; directions[2][1] = 0;
+            directions[3][0] = -1; directions[3][1] = 1;
+            directions[4][0] = 0;  directions[4][1] = 1;
             break;
         case 4: // Droite
-            directions[0][0] = 0;  directions[0][1] = -1;  
-            directions[1][0] = 1;  directions[1][1] = -1;  
-            directions[2][0] = 1;  directions[2][1] = 0;   
-            directions[3][0] = 1;  directions[3][1] = 1;   
-            directions[4][0] = 0;  directions[4][1] = 1;   
+            directions[0][0] = 0;  directions[0][1] = -1;
+            directions[1][0] = 1;  directions[1][1] = -1;
+            directions[2][0] = 1;  directions[2][1] = 0;
+            directions[3][0] = 1;  directions[3][1] = 1;
+            directions[4][0] = 0;  directions[4][1] = 1;
             break;
         default:
             SDL_Log("Orientation invalide");
             return EXIT_FAILURE;
     }
 
-    // Appliquer les dégâts et gérer le recul
-    for (int i = 0; i < 5; i++) {
-        int targetX = perso.posX + directions[i][0];
-        int targetY = perso.posY + directions[i][1];
+    // Appliquer les dégâts aux cases cibles
+for (int i = 0; i < 5; i++) {
+    int targetX = perso.posX + directions[i][0];
+    int targetY = perso.posY + directions[i][1];
 
-        // Vérifier si les coordonnées sont valides
-        if (targetX >= 0 && targetX < DIMENSION_MAP && targetY >= 0 && targetY < DIMENSION_MAP) {
-            if (map[targetX][targetY].contenu == 2) { // Monstre détecté
-                map[targetX][targetY].mstr.hp -= perso.sword_damage;
+    // Vérifier si les coordonnées sont valides
+    if (targetX >= 0 && targetX < DIMENSION_MAP && targetY >= 0 && targetY < DIMENSION_MAP) {
+        if (map[targetX][targetY].contenu == 2) { // Monstre détecté
+            // Passer un pointeur sur le monstre pour mettre à jour ses valeurs directement
+            monstre *targetMonstre = &map[targetX][targetY].mstr;
 
-                if (map[targetX][targetY].mstr.hp <= 0) {
-                    // Le monstre meurt
-                    lvlMaj(map[targetX][targetY].mstr); // Ajout d'expérience
-                    map[targetX][targetY].contenu = 0;  // Vider la case
-                    Mix_PlayChannel(CHANNEL_MONSTER_DEAD, mobDeadSound1, 0);  
-                } else {
-                    // Le monstre recule
-                    int reculeX = targetX + directions[i][0];
-                    int reculeY = targetY + directions[i][1];
+            degatMonstre(perso.sword_damage, targetMonstre); // Appeler avec pointeur
 
-                    if (reculeX >= 0 && reculeX < DIMENSION_MAP && reculeY >= 0 && reculeY < DIMENSION_MAP && map[reculeX][reculeY].contenu == 0) {
-                        map[reculeX][reculeY] = map[targetX][targetY]; // Déplacer le monstre
-                        map[targetX][targetY].contenu = 0;            // Vider l'ancienne case
-                    }
-                    Mix_PlayChannel(CHANNEL_MONSTER_HURT, mobHurtSound1, 0);
+            if (targetMonstre->hp <= 0) {
+                map[targetX][targetY].contenu = 0; // Vider la case si le monstre est mort
+            } else if ( targetMonstre->type != 4) {
+                // Calculer la direction opposée au joueur pour le recul
+                int reculX = targetX + directions[i][0];
+                int reculY = targetY + directions[i][1];
+
+                // Vérifier si la case de recul est valide et vide
+                if (reculX >= 0 && reculX < DIMENSION_MAP && reculY >= 0 && reculY < DIMENSION_MAP &&
+                    map[reculX][reculY].contenu == 0) {
+                    // Déplacer le monstre vers la case de recul
+                    map[reculX][reculY] = map[targetX][targetY];
+                    map[targetX][targetY].contenu = 0; // Vider la case initiale
                 }
             }
         }
     }
-
-    return EXIT_SUCCESS;
 }
 
-int degatMonstre(int dmg, monstre mstr) {
-    mstr.hp -= dmg;
-    Mix_PlayChannel(-1, mobHurtSound1, 0);  // Jouer le son des dégâts subis par le monstre
+return EXIT_SUCCESS;
 
-    if (mstr.hp > 0) {
-        //mstr.frameAnimation = -5;
-    } else {
-        //mstr.frameAnimation = -10;
-        lvlMaj(mstr);
-        if (mstr.loot > 1) {
-            perso.inv[mstr.loot]++;
-        }
-        Mix_PlayChannel(-1, mobDeadSound1, 0);  // Jouer le son de la mort du monstre
-    }
-    return 0;
 }
 
 void deplacerMonstresVersJoueur() {
@@ -369,7 +425,7 @@ void deplacerMonstresVersJoueur() {
 
     for (int i = 0; i < DIMENSION_MAP; i++) {
         for (int j = 0; j < DIMENSION_MAP; j++) {
-            if (map[i][j].contenu == 2) {  // Si la case contient un monstre
+            if ( ( map[i][j].contenu == 2 ) && ! ( map[i][j].mstr.type == 4 ) ) {  // Si la case contient un monstre
                 int dx = 0, dy = 0;
 
                 // Calculer la différence de position entre le monstre et le joueur
@@ -451,6 +507,10 @@ void utiliserObjet(int slot) {
                 Mix_PlayChannel(CHANNEL_POTION_LIFE, sonPotionLife, 0); // Son pour potion de vie
                 SDL_Log("Potion de vie utilisée. HP : %d", perso.hp);
                 perso.inv[slot]--;
+                if (perso.inv[slot] == 0) {
+                    strcpy(inventaireIcons[slot], "src/image/inventaireVide.bmp");
+                }
+                
             } else {
                 Mix_PlayChannel(CHANNEL_FAIL, sonFail, 0); // Son d'échec
                 SDL_Log("Potion de vie non utilisée : HP déjà au maximum.");
@@ -462,21 +522,14 @@ void utiliserObjet(int slot) {
             Mix_PlayChannel(CHANNEL_POTION_XP, sonPotionXP, 0); // Son pour potion d'XP
             SDL_Log("Potion d'XP utilisée. XP : %d", perso.xp);
             perso.inv[slot]--;
+            if (perso.inv[slot] == 0) {
+                strcpy(inventaireIcons[slot], "src/image/inventaireVide.bmp");
+            }
             break;
 
         case 4: // Clé à molette
-            Mix_PlayChannel(CHANNEL_WRENCH, sonWrench, 0); // Placeholder pour clé à molette
-            SDL_Log("Clé à molette utilisée. Vérifiez les interactions.");
-            break;
-
         case 5: // Clés
-            Mix_PlayChannel(CHANNEL_KEY, sonKey, 0); // Placeholder pour clé normale
-            SDL_Log("Clé utilisée. Vérifiez les interactions.");
-            break;
-
         case 6: // Grande clé
-            Mix_PlayChannel(CHANNEL_BIG_KEY, sonBigKey, 0); // Placeholder pour grande clé
-            SDL_Log("Grande clé utilisée. Vérifiez les interactions.");
             break;
 
         default:
@@ -519,25 +572,84 @@ void interagirEpee() {
     }
 }
 
+void detruireObjet() {
+    // Calculer la position de la case devant le joueur
+    int x = perso.posX;
+    int y = perso.posY;
+
+    switch (perso.direction) {
+        case 1: // Haut
+            y--;
+            break;
+        case 2: // Gauche
+            x--;
+            break;
+        case 3: // Bas
+            y++;
+            break;
+        case 4: // Droite
+            x++;
+            break;
+        default:
+            SDL_Log("Direction invalide du joueur.");
+            return;
+    }
+
+    // Vérifier que les coordonnées sont valides
+    if (x < 0 || x >= DIMENSION_MAP || y < 0 || y >= DIMENSION_MAP) {
+        SDL_Log("Case invalide.");
+        return;
+    }
+
+    // Vérifier si l'objet peut être détruit (coffre ou machine, mais pas grande machine)
+    if ((map[x][y].contenu == 3 && 
+        (map[x][y].spe.type == 1 || map[x][y].spe.type == 2 || map[x][y].spe.type == 6)) ||
+        (map[x][y].contenu == 3 && map[x][y].spe.type == 5)) { // Coffre ouvert ou machine
+
+        // Jouer le son de destruction
+        Mix_Chunk *breakSound = Mix_LoadWAV("src/musique/break.mp3");
+        if (breakSound) {
+            Mix_PlayChannel(CHANNEL_BRAK, breakSound, 0);
+        } else {
+            SDL_Log("Erreur de chargement du son de destruction : %s", Mix_GetError());
+        }
+
+        // Détruire l'objet et remplacer par un sol
+        map[x][y].contenu = 0; // Sol vide
+        map[x][y].spe.type = 0;
+
+    } else {
+        SDL_Log("Aucun objet destructible devant le joueur.");
+    }
+}
+
 void ouvrirCoffre(int x, int y) {
     if (perso.inv[5] > 0) { // Vérifie si le joueur a des clés
         perso.inv[5]--; // Consomme une clé
+        if (perso.inv[5] == 0) {
+            strcpy(inventaireIcons[5], "src/image/inventaireVide.bmp");
+        }
         Mix_PlayChannel(CHANNEL_KEY, sonKey, 0);
 
         // Ajouter des récompenses
         int proba = aleatoire(1, 100);
         if (proba <= 40) {
             perso.inv[4]++; // Clé à molette
+            strcpy(inventaireIcons[4], "src/image/inventaireWrench.bmp");
         } else if (proba <= 70) {
             perso.inv[2]++; // Potion de vie
+            strcpy(inventaireIcons[2], "src/image/inventairePotion.bmp");
         } else {
             perso.inv[3]++; // Potion d'XP
+            strcpy(inventaireIcons[3], "src/image/inventaireXp.bmp");
         }
 
-        if (++perso.nbCoffres == 10) {
+        if (++perso.nbCoffres == quotaPistolet) {
             perso.inv[1]++; // Pistolet
-        } else if (perso.nbCoffres == 20) {
+            strcpy(inventaireIcons[1], "src/image/inventairePistolet.bmp");
+        } else if (perso.nbCoffres == quotaBoss) {
             perso.inv[6]++; // Clé du boss
+            strcpy(inventaireIcons[6], "src/image/inventaireBossKey.bmp");
         }
 
         // Vider le coffre
@@ -551,6 +663,9 @@ void ouvrirCoffre(int x, int y) {
 void reparerMachine(int x, int y) {
     if (perso.inv[4] > 0) { // Vérifie si le joueur a une clé à molette
         perso.inv[4]--; // Consomme une clé à molette
+        if (perso.inv[4] == 0) {
+        strcpy(inventaireIcons[4], "src/image/inventaireVide.bmp");
+        }
         timer_start += 180000; // Ajoute 3 minutes
         Mix_PlayChannel(CHANNEL_WRENCH, sonWrench, 0);
 
@@ -565,21 +680,166 @@ void reparerMachine(int x, int y) {
 void reparerGrandeMachine(int x, int y) {
     if (perso.inv[4] > 0) { // Vérifie si le joueur a une clé à molette
         perso.inv[4]--; // Consomme une clé à molette
+        if (perso.inv[4] == 0) {
+        strcpy(inventaireIcons[4], "src/image/inventaireVide.bmp");
+        }
         if (map[x][y].spe.type == 3) {
             map[x][y].spe.type = 4; // Grande machine en réparation
             Mix_PlayChannel(CHANNEL_WRENCH, sonWrench, 0);
         } else if (map[x][y].spe.type == 4) {
             map[x][y].spe.type = 7; // Grande machine réparée
             machineFuite++;
+
+            // Effacer l'ancien affichage du texte des grandes machines réparées
+            SDL_Rect eraseRect = {
+                .x = WINDOW_WIDTH - 200,
+                .y = WINDOW_HEIGHT - 50,
+                .w = 190,
+                .h = 30
+            };
+            SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255); // Couleur noire
+            SDL_RenderFillRect(renderer, &eraseRect);
             Mix_PlayChannel(CHANNEL_WRENCH, sonWrench, 0);
         }
     } else {
         SDL_Log("Vous n'avez pas de clé à molette !");
+        Mix_PlayChannel(CHANNEL_FAIL, sonFail, 0); // Son si pas de clé à molette
     }
 }
 
+void bossInvoqueMonstres() {
+    static unsigned int dernierInvoque = 0; // Temps de la dernière invocation
+    unsigned int tempsActuel = SDL_GetTicks();
 
-void interagirEnvironnement() {
+    // Calculer le ratio de vie du boss (entre 0.0 et 1.0)
+    float ratioPv = (float)boss.hp / (float)boss.max_hp;
+
+    // Calculer le délai basé sur des paliers
+    unsigned int delaiInvocation = (unsigned int)(1000 + (500 * ceil(ratioPv * 10))); // 1s à 5s par palier de 10 %
+
+    // Vérifier si le délai est écoulé
+    if (tempsActuel - dernierInvoque >= delaiInvocation) {
+        dernierInvoque = tempsActuel;
+
+        // Définir les positions des monstres
+        int positions[4][2] = {
+            {boss.x + 3, boss.y + 3}, // Bas à droite
+            {boss.x - 3, boss.y + 3}, // Bas à gauche
+            {boss.x + 3, boss.y},     // Droite (ajouté après 50 %)
+            {boss.x - 3, boss.y}      // Gauche (ajouté après 50 %)
+        };
+
+        // Déterminer combien de monstres invoquer (4 si <= 50 % HP, sinon 2)
+        int nombreMonstres = (ratioPv <= 0.5) ? 4 : 2;
+
+        // Générer un monstre pour chaque position spécifiée
+        for (int i = 0; i < nombreMonstres; i++) {
+            int x = positions[i][0];
+            int y = positions[i][1];
+
+            // Vérifier que la case est valide et vide
+            if (x >= 0 && x < DIMENSION_MAP && y >= 0 && y < DIMENSION_MAP && map[x][y].contenu == 0) {
+                // Générer un type de monstre aléatoire
+                int typeMonstre = aleatoire(1, 3);
+
+                // Placer un monstre sur la carte
+                map[x][y].contenu = 2;
+                map[x][y].mstr.type = typeMonstre;
+                map[x][y].mstr.hp = (typeMonstre == 1) ? 80 : (typeMonstre == 2) ? 180 : 260;
+                map[x][y].mstr.xp = (typeMonstre == 1) ? 10 : (typeMonstre == 2) ? 20 : 30;
+            }
+        }
+    }
+}
+
+int mouvementHaut(void);
+
+void spawnBoss(int argc, char **argv) {
+    // Arrêter la musique actuelle
+    Mix_HaltMusic();
+
+    // Variable pour suivre le délai entre les actions
+    unsigned int delay = 1000; // Augmenter le délai à 500 millisecondes
+    unsigned int current_time = SDL_GetTicks();
+
+    int murX = perso.posX;
+    int murY = perso.posY - 1;
+    if (murX >= 0 && murX < DIMENSION_MAP && murY >= 0 && murY < DIMENSION_MAP) {
+        map[murX][murY].contenu = 0; // Placer un sol
+    } else {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Impossible de placer un sol au dessus du joueur : coordonnées invalides.");
+    }
+
+    // Mouvement du joueur de deux cases vers le haut, une par une
+    for (int i = 0; i < 2; i++) {
+        while (SDL_GetTicks() - current_time < delay) {
+            SDL_Delay(delay); // Attendre que le délai soit écoulé
+        }
+        current_time = SDL_GetTicks(); // Mettre à jour le temps actuel
+        mouvementHaut(); // Appeler la fonction de mouvement haut
+        //Xcamera = perso.posX - (WINDOW_WIDTH / caseSize) / 2;
+        //Ycamera = perso.posY - (WINDOW_HEIGHT / caseSize) / 2;
+
+        // Empêche la caméra de sortir des limites
+        if (Xcamera < 0) Xcamera = 0;
+        if (Ycamera < 0) Ycamera = 0;
+        if (Xcamera > DIMENSION_MAP - (WINDOW_WIDTH / caseSize)) {
+            Xcamera = DIMENSION_MAP - (WINDOW_WIDTH / caseSize);
+        }
+        if (Ycamera > DIMENSION_MAP - (WINDOW_HEIGHT / caseSize)) {
+            Ycamera = DIMENSION_MAP - (WINDOW_HEIGHT / caseSize);
+        }
+
+        if (camera(argc, argv) != EXIT_SUCCESS) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Erreur lors de la mise à jour de la caméra pendant la cinématique.");
+        }
+    }
+
+    // Placer un mur en dessous du joueur
+    murX = perso.posX;
+    murY = perso.posY + 1;
+    if (murX >= 0 && murX < DIMENSION_MAP && murY >= 0 && murY < DIMENSION_MAP) {
+        map[murX][murY].contenu = -2; // Placer un mur
+    } else {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Impossible de placer un mur sous le joueur : coordonnées invalides.");
+    }
+
+    // Jouer le son de la grande clé
+    if (Mix_PlayChannel(CHANNEL_BIG_KEY, sonBigKey, 0) == -1) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Erreur lors de la lecture du son de la grande clé : %s", Mix_GetError());
+    }
+
+    // Déplacer la caméra de deux cases vers le haut, une par une, pendant que le son joue
+    for (int i = 0; i < 2; i++) {
+        while (SDL_GetTicks() - current_time < delay) {
+            SDL_Delay(delay); // Attendre que le délai soit écoulé
+        }
+        current_time = SDL_GetTicks(); // Mettre à jour le temps actuel
+        if (Ycamera > 0) {
+            Ycamera--;
+        }
+        if (camera(argc, argv) != EXIT_SUCCESS) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Erreur lors de la mise à jour de la caméra pendant la cinématique.");
+        }
+    }
+
+    SDL_Delay(3000);
+
+    // Activer la variable indiquant que le boss est présent
+    bossPresent = SDL_TRUE;
+
+    // Charger et jouer la musique du boss en boucle
+    Mix_Music *bossMusic = Mix_LoadMUS("src/musique/boss.mp3");
+    if (!bossMusic) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Erreur lors du chargement de la musique du boss : %s", Mix_GetError());
+    } else {
+        if (Mix_PlayMusic(bossMusic, -1) == -1) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Erreur lors de la lecture de la musique du boss : %s", Mix_GetError());
+        }
+    }
+}
+
+void interagirEnvironnement(int argc, char **argv) {
     int x = perso.posX;
     int y = perso.posY;
 
@@ -617,15 +877,20 @@ void interagirEnvironnement() {
     // Interaction avec une grande machine
     else if (map[x][y].contenu == 3 && (map[x][y].spe.type == 3 || map[x][y].spe.type == 4)) {
         reparerGrandeMachine(x, y);
+    } else if (map[x][y].contenu == 4 && perso.inv[6] > 0) {
+        spawnBoss(argc, argv);
     } else {
         SDL_Log("Rien à interagir ici.");
     }
 }
 
 int testSol(int x, int y, int cote) {
+    static int bossSalleGeneree = 0; // Variable pour vérifier si la salle du boss a déjà été générée
+
     switch (map[x][y].contenu) {
         case -2:  // Mur
         case 3:   // Objet spécial
+        case 4:   // porte boss
             return 0;
             break;
 
@@ -634,79 +899,67 @@ int testSol(int x, int y, int cote) {
             int largeur = aleatoire(5, 11);
             int longueur = aleatoire(5, 11);
 
-            // Générer la nouvelle salle
-            if (genererSalleValide(largeur, longueur, num_salle, cote) != EXIT_SUCCESS) {
-                printf("Erreur lors de la génération de la salle\n");
-                
-                // Placer un mur à l'emplacement de la porte
-                int murX = perso.posX;
-                int murY = perso.posY;
+            // Vérifier si c'est la 20e salle, si le joueur vient du bas, et si la salle du boss n'a pas encore été générée
+            if (num_salle >= 30 && cote == 0 && bossSalleGeneree == 0) {
+                if (genererSalleBoss(cote)) {
+                    bossSalleGeneree = 1; // Marquer que la salle du boss a été générée
+                }
+                map[perso.posX][perso.posY - 1].contenu = 4; // Porte de boss
+                return 0; // Salle du boss généré
+            } else {
+                // Générer une salle classique si la salle du boss ne peut pas être générée
+                if (genererSalleValide(longueur, largeur, num_salle, cote) != EXIT_SUCCESS) {
+                    int murX = perso.posX;
+                    int murY = perso.posY;
 
+                    switch (cote) {
+                        case 0: murY = perso.posY - 1; break;
+                        case 1: murX = perso.posX - 1; break;
+                        case 2: murY = perso.posY + 1; break;
+                        case 3: murX = perso.posX + 1; break;
+                        default: break;
+                    }
+
+                    if (murX >= 0 && murX < DIMENSION_MAP && murY >= 0 && murY < DIMENSION_MAP) {
+                        map[murX][murY].contenu = -2; // Placer un mur
+                    }
+
+                    return 0; // Aucun mouvement ne doit être effectué
+                }
+
+                // Déplacement du joueur si une salle classique a été générée avec succès
                 switch (cote) {
-                    case 0: // Haut
-                        murY = perso.posY - 1;
-                        break;
-                    case 1: // Gauche
-                        murX = perso.posX - 1;
-                        break;
-                    case 2: // Bas
-                        murY = perso.posY + 1;
-                        break;
-                    case 3: // Droite
-                        murX = perso.posX + 1;
-                        break;
-                    default:
-                        break;
+                    case 0: perso.posY = y + 1; break;
+                    case 1: perso.posX = x + 1; break;
+                    case 2: perso.posY = y - 1; break;
+                    case 3: perso.posX = x - 1; break;
+                    default: break;
                 }
-
-                // Vérifier si les coordonnées du mur sont valides
-                if (murX >= 0 && murX < DIMENSION_MAP && murY >= 0 && murY < DIMENSION_MAP) {
-                    map[murX][murY].contenu = -2; // Placer un mur
-                    printf("Mur placé aux coordonnées (%d, %d)\n", murX, murY);
+                Mix_PlayChannel(CHANNEL_ROOM, sonRoom, 0);
+                return 1;
                 }
-
-                // Retourner 0 pour indiquer qu'aucun mouvement ne doit être effectué
-                return 0;
-            }
-
-            // Déplacement du joueur si la salle a été générée avec succès
-            switch (cote) {
-                case 0: // Haut
-                    perso.posY = y + 1;
-                    break;
-                case 1: // Gauche
-                    perso.posX = x + 1;
-                    break;
-                case 2: // Bas
-                    perso.posY = y - 1;
-                    break;
-                case 3: // Droite
-                    perso.posX = x - 1;
-                    break;
-                default:
-                    break;
-            }
-            Mix_PlayChannel(CHANNEL_ROOM, sonRoom, 0);
-            return 1;
-            break;
 
         case 2:  // Monstre
-            if (!perso.invulnerable) {
-                perso.hp--;
-                Mix_PlayChannel(CHANNEL_DAMAGE, sonDamage, 0);
-                // Suppression du monstre
-                map[x][y].contenu = 0;
-                map[x][y].mstr.hp = 0;
+            if (map[x][y].mstr.type != 4) {
+                if (!perso.invulnerable) {
+                    perso.hp--;
+                    Mix_PlayChannel(CHANNEL_DAMAGE, sonDamage, 0);
+                    // Suppression du monstre
+                    map[x][y].contenu = 0;
+                    map[x][y].mstr.hp = 0;
 
-                perso.invulnerable = SDL_TRUE;
-                perso.invulnerable_timer = SDL_GetTicks();
+                    perso.invulnerable = SDL_TRUE;
+                    perso.invulnerable_timer = SDL_GetTicks();
+                }
+
+                if (perso.hp <= 0) {
+                    gameOver();
+                }
+
+                return 1;
+                break;
             }
-
-            if (perso.hp <= 0) {
-                gameOver();
-            }
-
-            return 1;
+            return 0;
             break;
 
         case 0: // Case vide
@@ -725,7 +978,7 @@ int testSol(int x, int y, int cote) {
 
 int mouvementHaut(void) {
     if (perso.posY > 0 && testSol(perso.posX, perso.posY - 1, 0)) {
-        if (Ycamera > 0) {
+        if ( ( Ycamera > 0 ) && ! bossPresent) {
             Ycamera--;
         }
         persoPast.posX = perso.posX;
@@ -742,7 +995,7 @@ int mouvementHaut(void) {
 
 int mouvementBas(void) {
     if (perso.posY < DIMENSION_MAP - 1 && testSol(perso.posX, perso.posY + 1, 2)) {
-        if (Ycamera < DIMENSION_MAP - (WINDOW_HEIGHT / 100)) {
+        if ( ( Ycamera < DIMENSION_MAP - (WINDOW_HEIGHT / 100) ) && ! bossPresent ) {
             Ycamera++;
         }
         persoPast.posX = perso.posX;
@@ -759,7 +1012,7 @@ int mouvementBas(void) {
 
 int mouvementGauche(void) {
     if (perso.posX > 0 && testSol(perso.posX - 1, perso.posY, 1)) {
-        if (Xcamera > 0) {
+        if ( ( Xcamera > 0 ) && ! bossPresent) {
             Xcamera--;
         }
         persoPast.posX = perso.posX;
@@ -776,7 +1029,7 @@ int mouvementGauche(void) {
 
 int mouvementDroite(void) {
     if (perso.posX < DIMENSION_MAP - 1 && testSol(perso.posX + 1, perso.posY, 3)) {
-        if (Xcamera < DIMENSION_MAP - (WINDOW_WIDTH / 100)) {
+        if ( ( Xcamera < DIMENSION_MAP - (WINDOW_WIDTH / 100) ) && ! bossPresent ) {
             Xcamera++;
         }
         persoPast.posX = perso.posX;
@@ -789,352 +1042,4 @@ int mouvementDroite(void) {
         return EXIT_FAILURE;
     }
     return EXIT_SUCCESS;
-}
-
-
-
-void save_game(const char *filename) {
-    FILE *file = fopen(filename, "w");
-    if (file) {
-        fprintf(file, "Level: %d, XP: %d\n", perso.lvl, perso.xp);
-        fclose(file);
-        printf("Game saved!\n");
-    } else {
-        printf("Error saving game!\n");
-    }
-}
-
-void afficher_menu(SDL_Renderer *renderer, TTF_Font *font, int highlight, char *choices[], int n_choices) {
-    SDL_Color white = {255, 255, 255, 255};
-    SDL_Color red = {255, 0, 0, 255};
-    SDL_Rect menuRect;
-
-    // Boucle d'affichage des choix du menu
-    for (int i = 0; i < n_choices; i++) {
-        SDL_Surface *surface = TTF_RenderText_Solid(font, choices[i], (i == highlight) ? red : white);
-        SDL_Texture *texture = SDL_CreateTextureFromSurface(renderer, surface);
-        SDL_FreeSurface(surface);
-
-        menuRect.x = 200;  // Position horizontale
-        menuRect.y = 150 + (i * 50);  // Position verticale
-        menuRect.w = 400;
-        menuRect.h = 50;
-        
-        SDL_RenderCopy(renderer, texture, NULL, &menuRect);
-        SDL_DestroyTexture(texture);
-    }
-    SDL_RenderPresent(renderer);
-}
-
-int pause() {
-    SDL_bool continuer = SDL_TRUE;
-    SDL_Event event;
-
-    if (TTF_Init() == -1) {
-    SDL_Log("Erreur lors de l'initialisation de SDL_ttf : %s\n", TTF_GetError());
-    return EXIT_FAILURE;
-    }
-
-    // Dimensions de la fenêtre du menu pause
-    int menu_width = 400;
-    int menu_height = 300;
-    int button_width = 200;
-    int button_height = 50;
-    int spacing = 20;
-
-    // Définir les couleurs
-    SDL_Color backgroundColor = {50, 50, 50, 255};  // Gris foncé
-    SDL_Color buttonColor = {100, 100, 100, 255};   // Gris clair
-    SDL_Color buttonHoverColor = {150, 150, 150, 255};  // Couleur des boutons survolés
-    SDL_Color textColor = {255, 255, 255, 255};  // Blanc pour le texte
-
-    // Charger une police pour le texte
-    TTF_Font *font = TTF_OpenFont("./src/fonts/SPACEBAR.ttf", 32);
-    if (!font) {
-        SDL_Log("Erreur lors du chargement de la police : %s\n", TTF_GetError());
-        return EXIT_FAILURE;
-    }
-
-    // Positions des boutons
-    SDL_Rect button_resume = {(WINDOW_WIDTH - button_width) / 2, (WINDOW_HEIGHT - menu_height) / 2 + 50, button_width, button_height};
-    SDL_Rect button_save = {(WINDOW_WIDTH - button_width) / 2, button_resume.y + button_height + spacing, button_width, button_height};
-    SDL_Rect button_quit = {(WINDOW_WIDTH - button_width) / 2, button_save.y + button_height + spacing, button_width, button_height};
-
-    // Créer les surfaces et textures pour le texte des boutons
-    SDL_Surface *textPauseSurface = TTF_RenderText_Solid(font, "Menu Pause", textColor);
-    SDL_Surface *textResumeSurface = TTF_RenderText_Solid(font, "Reprendre", textColor);
-    SDL_Surface *textSaveSurface = TTF_RenderText_Solid(font, "Sauvegarder", textColor);
-    SDL_Surface *textQuitSurface = TTF_RenderText_Solid(font, "Quitter", textColor);
-
-    SDL_Texture *textPauseTexture = SDL_CreateTextureFromSurface(renderer, textPauseSurface);
-    SDL_Texture *textResumeTexture = SDL_CreateTextureFromSurface(renderer, textResumeSurface);
-    SDL_Texture *textSaveTexture = SDL_CreateTextureFromSurface(renderer, textSaveSurface);
-    SDL_Texture *textQuitTexture = SDL_CreateTextureFromSurface(renderer, textQuitSurface);
-
-    SDL_FreeSurface(textPauseSurface);
-    SDL_FreeSurface(textResumeSurface);
-    SDL_FreeSurface(textSaveSurface);
-    SDL_FreeSurface(textQuitSurface);
-
-    SDL_Rect textPauseRect = {(WINDOW_WIDTH - 200) / 2, (WINDOW_HEIGHT - menu_height) / 2, 200, 50};
-
-    // Variables pour savoir si un bouton est survolé
-    SDL_bool hover_resume = SDL_FALSE;
-    SDL_bool hover_save = SDL_FALSE;
-    SDL_bool hover_quit = SDL_FALSE;
-
-    while (continuer) {
-        while (SDL_PollEvent(&event)) {
-            switch (event.type) {
-                case SDL_QUIT:
-                    return EXIT_FAILURE;
-
-                case SDL_MOUSEMOTION:
-                    // Vérifier si la souris survole les boutons
-                    if (event.motion.x >= button_resume.x && event.motion.x <= button_resume.x + button_width &&
-                        event.motion.y >= button_resume.y && event.motion.y <= button_resume.y + button_height) {
-                        hover_resume = SDL_TRUE;
-                    } else {
-                        hover_resume = SDL_FALSE;
-                    }
-
-                    if (event.motion.x >= button_save.x && event.motion.x <= button_save.x + button_width &&
-                        event.motion.y >= button_save.y && event.motion.y <= button_save.y + button_height) {
-                        hover_save = SDL_TRUE;
-                    } else {
-                        hover_save = SDL_FALSE;
-                    }
-
-                    if (event.motion.x >= button_quit.x && event.motion.x <= button_quit.x + button_width &&
-                        event.motion.y >= button_quit.y && event.motion.y <= button_quit.y + button_height) {
-                        hover_quit = SDL_TRUE;
-                    } else {
-                        hover_quit = SDL_FALSE;
-                    }
-                    break;
-
-                case SDL_MOUSEBUTTONDOWN:
-                    if (event.button.button == SDL_BUTTON_LEFT) {
-                        // Vérifier quel bouton a été cliqué
-                        if (hover_resume) {
-                            Mix_PlayChannel(CHANNEL_HOVER, sonHover, 0);
-                            continuer = SDL_FALSE;  // Reprendre la partie
-                        } else if (hover_save) {
-                            Mix_PlayChannel(CHANNEL_HOVER, sonHover, 0);
-                            // Fonction de sauvegarde (à implémenter)
-                            SDL_Log("Sauvegarde en cours...");
-                        } else if (hover_quit) {
-                            Mix_PlayChannel(CHANNEL_HOVER, sonHover, 0);
-                            return EXIT_FAILURE;  // Quitter le jeu
-                        }
-                    }
-                    break;
-
-                default:
-                    break;
-            }
-        }
-
-        // Dessiner l'arrière-plan du menu pause
-        SDL_SetRenderDrawColor(renderer, backgroundColor.r, backgroundColor.g, backgroundColor.b, backgroundColor.a);
-        SDL_RenderClear(renderer);
-
-        // Dessiner les boutons
-        SDL_SetRenderDrawColor(renderer, buttonColor.r, buttonColor.g, buttonColor.b, buttonColor.a);
-        
-        // Résumé bouton
-        if (hover_resume) {
-            SDL_SetRenderDrawColor(renderer, buttonHoverColor.r, buttonHoverColor.g, buttonHoverColor.b, buttonHoverColor.a);
-        }
-        SDL_RenderFillRect(renderer, &button_resume);
-        SDL_RenderCopy(renderer, textResumeTexture, NULL, &button_resume);
-
-        // Sauvegarder bouton
-        SDL_SetRenderDrawColor(renderer, buttonColor.r, buttonColor.g, buttonColor.b, buttonColor.a);
-        if (hover_save) {
-            SDL_SetRenderDrawColor(renderer, buttonHoverColor.r, buttonHoverColor.g, buttonHoverColor.b, buttonHoverColor.a);
-        }
-        SDL_RenderFillRect(renderer, &button_save);
-        SDL_RenderCopy(renderer, textSaveTexture, NULL, &button_save);
-
-        // Quitter bouton
-        SDL_SetRenderDrawColor(renderer, buttonColor.r, buttonColor.g, buttonColor.b, buttonColor.a);
-        if (hover_quit) {
-            SDL_SetRenderDrawColor(renderer, buttonHoverColor.r, buttonHoverColor.g, buttonHoverColor.b, buttonHoverColor.a);
-        }
-        SDL_RenderFillRect(renderer, &button_quit);
-        SDL_RenderCopy(renderer, textQuitTexture, NULL, &button_quit);
-
-        // Afficher le texte "Menu Pause"
-        SDL_RenderCopy(renderer, textPauseTexture, NULL, &textPauseRect);
-
-        // Présenter le rendu
-        SDL_RenderPresent(renderer);
-    }
-
-    // Nettoyage des textures
-    SDL_DestroyTexture(textPauseTexture);
-    SDL_DestroyTexture(textResumeTexture);
-    SDL_DestroyTexture(textSaveTexture);
-    SDL_DestroyTexture(textQuitTexture);
-    TTF_CloseFont(font);
-
-    return EXIT_SUCCESS;
-}
-
-void dessinerRectangleSelection(SDL_Renderer *renderer, int selectedSlot) {
-    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255); // Couleur noire
-    SDL_Rect rect = {
-        .x = startX - 10,
-        .y = WINDOW_HEIGHT - 100 + caseSize + 5,
-        .w = caseSize * 8,
-        .h = 30
-    };
-    SDL_RenderFillRect(renderer, &rect);
-    SDL_RenderPresent(renderer); // Assurez-vous d'actualiser l'écran
-}
-
-void lancerBoucleDeJeu(int argc, char **argv) {
-    start_time = SDL_GetTicks();
-
-    SDL_bool continuer = SDL_TRUE;
-    SDL_Event event;
-    unsigned int frame_limit = 0;
-    unsigned int dernier_deplacement_monstres = 0;  // Pour gérer le délai entre chaque déplacement de monstres
-
-    // Variable pour l'emplacement d'inventaire sélectionné
-    int selectedSlot = 0;  // Par défaut, le premier emplacement est sélectionné
-
-    // Charger la police pour l'interface
-    TTF_Font *font = TTF_OpenFont("./src/fonts/ui.otf", 24);
-    if (!font) {
-        SDL_Log("Erreur lors du chargement de la police pour l'interface : %s", TTF_GetError());
-        return;
-    }
-
-    while (continuer) {
-        while (SDL_PollEvent(&event)) {
-            switch (event.type) {
-                case SDL_QUIT:
-                    continuer = SDL_FALSE;
-                    break;
-
-                case SDL_KEYDOWN:
-                    // Gestion des touches numériques pour sélectionner un emplacement d'inventaire
-                    if (event.key.keysym.sym >= SDLK_1 && event.key.keysym.sym <= SDLK_7) {
-                        selectedSlot = event.key.keysym.sym - SDLK_1;  // Sélection de 0 à 6
-                    }
-
-                    // Gestion des autres touches (mouvement, interaction, utilisation d'objet)
-                    switch (event.key.keysym.sym) {
-                        case SDLK_w: // Molette haut (équivalent)
-                            selectedSlot = (selectedSlot + 1) % 7; // Passer au slot suivant
-                            if (selectedSlot < 0) selectedSlot = 6; // Correction pour éviter un slot négatif
-                            dessinerRectangleSelection(renderer, selectedSlot);
-                            break;
-
-                        case SDLK_x: // Molette bas (équivalent)
-                            selectedSlot = (selectedSlot - 1 + 7) % 7; // Passer au slot précédent
-                            dessinerRectangleSelection(renderer, selectedSlot);
-                            break;
-
-                        case SDLK_e: // Utilisation d'un objet
-                            utiliserObjet(selectedSlot);
-                            break;
-
-                        case SDLK_SPACE:
-                        case SDLK_a: // Interaction avec l'environnement
-                            interagirEnvironnement();
-                            break;
-
-                        case SDLK_z:
-                        case SDLK_UP: // Déplacement haut
-                            if (mouvementHaut() != EXIT_SUCCESS) {
-                                SDL_ExitWithError("Erreur mouvement haut");
-                            }
-                            break;
-
-                        case SDLK_q:
-                        case SDLK_LEFT: // Déplacement gauche
-                            if (mouvementGauche() != EXIT_SUCCESS) {
-                                SDL_ExitWithError("Erreur mouvement gauche");
-                            }
-                            break;
-
-                        case SDLK_s:
-                        case SDLK_DOWN: // Déplacement bas
-                            if (mouvementBas() != EXIT_SUCCESS) {
-                                SDL_ExitWithError("Erreur mouvement bas");
-                            }
-                            break;
-
-                        case SDLK_d:
-                        case SDLK_RIGHT: // Déplacement droite
-                            if (mouvementDroite() != EXIT_SUCCESS) {
-                                SDL_ExitWithError("Erreur mouvement droite");
-                            }
-                            break;
-
-                        case SDLK_ESCAPE: // Pause
-                            Mix_PlayChannel(CHANNEL_MENU, sonMenu, 0);
-                            if (pause() != EXIT_SUCCESS) {
-                                continuer = SDL_FALSE;  // Quitter si le joueur sélectionne "Quitter"
-                            }
-                            break;
-
-                        default:
-                            break;
-                    }
-                    break;
-
-                case SDL_MOUSEBUTTONDOWN:
-                    if (event.button.button == SDL_BUTTON_LEFT) {
-                        utiliserObjet(selectedSlot); // Utiliser l'objet sélectionné
-                    } else if (event.button.button == SDL_BUTTON_RIGHT) {
-                        interagirEnvironnement(); // Interaction avec clic droit
-                    }
-                    break;
-
-                case SDL_MOUSEWHEEL: // Molette pour changer de case
-                    if (event.wheel.y > 0) {
-                        selectedSlot = (selectedSlot + 1) % 7;
-                        dessinerRectangleSelection(renderer, selectedSlot);
-                    } else if (event.wheel.y < 0) {
-                        selectedSlot = (selectedSlot - 1 + 7) % 7;
-                        dessinerRectangleSelection(renderer, selectedSlot);
-                    }
-                    break;
-
-                default:
-                    break;
-            }
-        }
-
-        // Déplacer les monstres toutes les secondes
-        unsigned int temps_courant = SDL_GetTicks();
-        if (temps_courant - dernier_deplacement_monstres >= 1000) {
-            deplacerMonstresVersJoueur();
-            dernier_deplacement_monstres = temps_courant;
-        }
-
-        // Vérifier si l'invulnérabilité a expiré
-        if (perso.invulnerable && (SDL_GetTicks() - perso.invulnerable_timer >= 3000)) {
-            perso.invulnerable = SDL_FALSE;
-        }
-
-        // Afficher le jeu (rendu de la carte, caméra, etc.)
-        if (camera(argc, argv) != EXIT_SUCCESS) {
-            SDL_ExitWithError("Problème fonction camera");
-        }
-
-        // Afficher l'interface utilisateur
-        afficherInterface(renderer, font, selectedSlot);
-
-        // Limiter les FPS
-        frame_limit = SDL_GetTicks() + FPS_LIMIT;
-        SDL_LimitFPS(frame_limit);
-    }
-
-    // Nettoyage de la police
-    TTF_CloseFont(font);
 }

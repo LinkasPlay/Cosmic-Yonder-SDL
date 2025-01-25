@@ -10,6 +10,8 @@
 #include "CosmicYonder.h"
 
 extern int jeu(int argc, char **argv);
+extern int chargerPartie(const char *nomFichier);
+extern void lancerBoucleDeJeu(int argc, char **argv);
 int num_salle;
 
 Mix_Chunk *sonMenu = NULL;
@@ -30,6 +32,9 @@ Mix_Chunk *sonKey = NULL;
 Mix_Chunk *sonBigKey = NULL;
 Mix_Chunk *sonFail = NULL;
 Mix_Chunk *sonSwordPickup = NULL;
+Mix_Chunk *sonItem = NULL;
+Mix_Chunk *mobBossSound = NULL;
+
 
 void initialiserSons() {
     // Allouer les canaux nécessaires
@@ -125,6 +130,16 @@ void initialiserSons() {
     if (!sonSwordPickup) {
         SDL_Log("Erreur chargement son prise épée: %s", Mix_GetError());
     }
+
+    sonItem = Mix_LoadWAV("./src/musique/item.mp3");
+    if (!sonItem) {
+        SDL_Log("Erreur chargement son item: %s", Mix_GetError());
+    }
+
+    mobBossSound = Mix_LoadWAV("./src/musique/bossHurt.mp3");
+    if (!sonMenu) {
+        SDL_Log("Erreur chargement son degat boss: %s", Mix_GetError());
+    }
 }
 
 void clean_ressources(SDL_Window *w, SDL_Renderer *r, SDL_Texture *t) {
@@ -154,14 +169,104 @@ void clean_ressources(SDL_Window *w, SDL_Renderer *r, SDL_Texture *t) {
 }
 
 
-// NE PAS BOUGER WINDOW ET RENDERER OU IMPOSSIBLE DE COMPILER
+// NE PAS BOUGER WINDOW ET RENDERER OU IMPOSSIBLE DE COMPILER, JSP POURQUOI
 SDL_Window *window = NULL;
 SDL_Renderer *renderer = NULL; 
 Mix_Music *menuMusic = NULL;
 Mix_Music *gameMusic = NULL;
 Mix_Music *musique_acceleree = NULL;
 
-int afficherMenuPrincipal(SDL_Renderer *renderer) {
+void captureEntree(SDL_Renderer *renderer, TTF_Font *font, char *input, size_t tailleMax) {
+    SDL_bool entrerValeur = SDL_TRUE;
+    int input_pos = 0;
+
+    SDL_Color textColor = {255, 255, 255, 255}; // Blanc
+
+    // Message d'invite
+    const char *message = "Entrez la valeur :";
+    SDL_Surface *messageSurface = TTF_RenderText_Solid(font, message, textColor);
+    SDL_Texture *messageTexture = SDL_CreateTextureFromSurface(renderer, messageSurface);
+    SDL_FreeSurface(messageSurface);
+
+    SDL_Rect messageRect;
+    int messageWidth, messageHeight;
+    SDL_QueryTexture(messageTexture, NULL, NULL, &messageWidth, &messageHeight);
+    messageRect.x = (WINDOW_WIDTH - messageWidth) / 2;
+    messageRect.y = WINDOW_HEIGHT / 3;
+    messageRect.w = messageWidth;
+    messageRect.h = messageHeight;
+
+    // Rectangle pour afficher la saisie
+    SDL_Rect inputRect = {
+        .x = messageRect.x,
+        .y = messageRect.y + messageRect.h + 20,
+        .w = 200,
+        .h = 50
+    };
+
+    while (entrerValeur) {
+        SDL_Event event;
+        while (SDL_PollEvent(&event)) {
+            switch (event.type) {
+                case SDL_QUIT:
+                    SDL_Quit();
+                    exit(EXIT_SUCCESS);
+
+                case SDL_TEXTINPUT:
+                    if (strlen(event.text.text) == 1 && input_pos < tailleMax - 1) {
+                        input[input_pos++] = event.text.text[0];
+                        input[input_pos] = '\0';
+                    }
+                    break;
+
+                case SDL_KEYDOWN:
+                    if (event.key.keysym.sym == SDLK_BACKSPACE && input_pos > 0) {
+                        input[--input_pos] = '\0';
+                    } else if ((event.key.keysym.sym == SDLK_RETURN || event.key.keysym.sym == SDLK_KP_ENTER) && input_pos > 0) {
+                        entrerValeur = SDL_FALSE;
+                    }
+                    break;
+
+                default:
+                    break;
+            }
+        }
+
+        // Effacer l'écran
+        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+        SDL_RenderClear(renderer);
+
+        // Afficher le message
+        SDL_RenderCopy(renderer, messageTexture, NULL, &messageRect);
+
+        // Ajuster la largeur du rectangle d'entrée
+        int inputWidth = input_pos * 24;
+        inputRect.w = (inputWidth > 200) ? inputWidth : 200;
+
+        // Dessiner l'encadré de saisie
+        SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+        SDL_RenderDrawRect(renderer, &inputRect);
+
+        // Afficher l'entrée utilisateur
+        SDL_Surface *inputSurface = TTF_RenderText_Solid(font, input, textColor);
+        if (inputSurface) {
+            SDL_Texture *inputTexture = SDL_CreateTextureFromSurface(renderer, inputSurface);
+            SDL_FreeSurface(inputSurface);
+
+            if (inputTexture) {
+                SDL_Rect inputTextRect = {inputRect.x + 5, inputRect.y + 5, inputWidth, inputRect.h - 10};
+                SDL_RenderCopy(renderer, inputTexture, NULL, &inputTextRect);
+                SDL_DestroyTexture(inputTexture);
+            }
+        }
+
+        SDL_RenderPresent(renderer);
+    }
+
+    SDL_DestroyTexture(messageTexture);
+}
+
+int afficherMenuPrincipal(SDL_Renderer *renderer, int argc, char **argv) {
     SDL_Surface *background = NULL;
     SDL_Texture *backgroundTexture = NULL;
 
@@ -171,20 +276,26 @@ int afficherMenuPrincipal(SDL_Renderer *renderer) {
         return EXIT_FAILURE;
     }
 
-    TTF_Font *font = TTF_OpenFont("./src/fonts/SPACEBAR.ttf", 32);
-    if (!font) {
+    TTF_Font *fontTitre = TTF_OpenFont("./src/fonts/titre.ttf", 32);
+    if (!fontTitre) {
         SDL_Log("Erreur lors du chargement de la police : %s\n", TTF_GetError());
         return EXIT_FAILURE;
     }
 
     TTF_Font *fontUI = TTF_OpenFont("./src/fonts/ui.otf", 32);
-    if (!font) {
+    if (!fontUI) {
+        SDL_Log("Erreur lors du chargement de la police : %s\n", TTF_GetError());
+        return EXIT_FAILURE;
+    }
+
+    TTF_Font *fontTexte = TTF_OpenFont("./src/fonts/ui.otf", 32);
+    if (!fontTexte) {
         SDL_Log("Erreur lors du chargement de la police : %s\n", TTF_GetError());
         return EXIT_FAILURE;
     }
 
     // Charger l'image de fond
-    background = SDL_LoadBMP("./src/image/spacet.bmp");
+    background = SDL_LoadBMP("./src/image/menu.bmp");
     if (background == NULL) {
         SDL_Log("Erreur : Chargement de l'image échoué > %s\n", SDL_GetError());
         return EXIT_FAILURE;
@@ -216,9 +327,9 @@ int afficherMenuPrincipal(SDL_Renderer *renderer) {
     Mix_PlayMusic(menuMusic, -1);
 
     // Définir les boutons du menu principal
-    int button_width = 300;
-    int button_height = 50;
-    int spacing = 30;
+    int button_width = 350;
+    int button_height = 60;
+    int spacing = 40;
 
     SDL_Rect button_new_game = {(WINDOW_WIDTH - button_width) / 2, WINDOW_HEIGHT / 2 - (2 * (button_height + spacing)), button_width, button_height};
     SDL_Rect button_load_game = {(WINDOW_WIDTH - button_width) / 2, button_new_game.y + button_height + spacing, button_width, button_height};
@@ -230,10 +341,10 @@ int afficherMenuPrincipal(SDL_Renderer *renderer) {
     SDL_Color buttonHoverColor = {150, 150, 150, 255};
     SDL_Color textColor = {255, 255, 255, 255};
 
-    SDL_Surface *textNewGameSurface = TTF_RenderText_Solid(font, "Nouvelle Partie", textColor);
-    SDL_Surface *textLoadGameSurface = TTF_RenderText_Solid(font, "Charger Partie", textColor);
-    SDL_Surface *textSoundtrackSurface = TTF_RenderText_Solid(font, "Soundtrack", textColor);
-    SDL_Surface *textQuitSurface = TTF_RenderText_Solid(font, "Quitter", textColor);
+    SDL_Surface *textNewGameSurface = TTF_RenderText_Solid(fontTitre, "Nouvelle Partie", textColor);
+    SDL_Surface *textLoadGameSurface = TTF_RenderText_Solid(fontTitre, "Charger Partie", textColor);
+    SDL_Surface *textSoundtrackSurface = TTF_RenderText_Solid(fontTitre, "Soundtrack", textColor);
+    SDL_Surface *textQuitSurface = TTF_RenderText_Solid(fontTitre, "Quitter", textColor);
 
     SDL_Texture *textNewGameTexture = SDL_CreateTextureFromSurface(renderer, textNewGameSurface);
     SDL_Texture *textLoadGameTexture = SDL_CreateTextureFromSurface(renderer, textLoadGameSurface);
@@ -292,17 +403,52 @@ int afficherMenuPrincipal(SDL_Renderer *renderer) {
                         // Bouton Nouvelle Partie
                         if (hover_new_game) {
                             Mix_PlayChannel(CHANNEL_HOVER, sonHover, 0);
-                            Mix_HaltMusic();  // Arrêter la musique du menu
-                            Mix_FreeMusic(menuMusic);  // Libérer la musique du menu
-
-                            // Charger et jouer la musique du jeu
-                            gameMusic = Mix_LoadMUS("./src/musique/vaisseau.mp3");
-                            if (!gameMusic) {
-                                SDL_Log("Erreur lors du chargement de la musique du jeu : %s\n", Mix_GetError());
-                            }
-                            Mix_PlayMusic(gameMusic, -1);
 
                             return EXIT_SUCCESS; // Commence le jeu
+                        }
+                        if (hover_load_game) {
+                            char input[100] = {0};
+
+                            // Capture l'entrée utilisateur via SDL
+                            captureEntree(renderer, fontTexte, input, sizeof(input));
+
+                            // Charger le fichier de sauvegarde
+                            char nomFichier[256];
+                            sprintf(nomFichier, "saves/save_%s.sav", input);
+
+                            FILE *file = fopen(nomFichier, "r");
+                            if (file) {
+                                fclose(file);
+                                SDL_Log("Le fichier existe.");
+                            } else {
+                                SDL_Log("Le fichier n'existe pas.");
+                            }
+
+                            if (chargerPartie(nomFichier) == EXIT_FAILURE) {
+                                SDL_Log("Échec du chargement de la partie.");
+                            } else {
+                                SDL_Log("Partie chargée avec succès.");
+                                Mix_HaltMusic();  // Arrêter la musique du menu
+                                Mix_FreeMusic(menuMusic);
+
+                                // Charger et jouer la musique du jeu
+                                gameMusic = Mix_LoadMUS("./src/musique/vaisseau.mp3");
+                                if (!gameMusic) {
+                                    SDL_Log("Erreur lors du chargement de la musique du jeu : %s\n", Mix_GetError());
+                                }
+                                Mix_PlayMusic(gameMusic, -1);
+
+                                lancerBoucleDeJeu(argc, argv);
+
+                                Mix_HaltMusic();
+                                Mix_FreeMusic(menuMusic);
+                                Mix_CloseAudio();
+                                SDL_DestroyTexture(backgroundTexture);
+                                SDL_DestroyRenderer(renderer);
+                                SDL_DestroyWindow(window);
+                                SDL_Quit();
+                                exit(EXIT_SUCCESS);
+                            }
                         }
                         // Bouton Quitter
                         if (hover_quit) {
@@ -370,7 +516,7 @@ int afficherMenuPrincipal(SDL_Renderer *renderer) {
     SDL_DestroyTexture(textQuitTexture);
     SDL_DestroyTexture(backgroundTexture);
 
-    TTF_CloseFont(font);
+    TTF_CloseFont(fontTitre);
     TTF_Quit();
 
     return EXIT_SUCCESS;
@@ -409,7 +555,7 @@ int main(int argc, char **argv) {
     }
 
     // Afficher le menu principal
-    if (afficherMenuPrincipal(renderer) != EXIT_SUCCESS) {
+    if (afficherMenuPrincipal(renderer, argc, argv) != EXIT_SUCCESS) {
         SDL_Log("Erreur : Affichage du menu principal échoué");
         clean_ressources(window, renderer, NULL);
         exit(EXIT_FAILURE);

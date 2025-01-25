@@ -31,6 +31,7 @@ int porteLibre = 0;
 int grandesMachinesPlacees = 0;
 extern personnage perso;
 extern personnage persoPast;
+extern Boss boss;
 
 extern int graine;
 int entreeX;
@@ -231,7 +232,7 @@ int generation(int longueur, int largeur, int num_salle, int cote) {
             p[i][j].contenu = 0;
             p[i][j].mstr.hp = 0;
             p[i][j].mstr.xp = 0;
-            p[i][j].mstr.loot = 0;
+            p[i][j].mstr.morceau = 0;
             p[i][j].mstr.type = 0;
             p[i][j].spe.type = 0;
             p[i][j].spe.inv = 0;
@@ -316,31 +317,35 @@ int generation(int longueur, int largeur, int num_salle, int cote) {
             } else if (aleatoire(1, 100) <= 40) { // 40% de chance de générer un objet ou un monstre
                 if (obj < ((longueur - 2) * (largeur - 2)) / OBJ_MAX) {
                     int proba = aleatoire(1, 100); // Générer un nombre entre 1 et 100
-                    if (proba <= 40) {
-                        // Monstre type 1 (40 %)
+                    if (proba <= 30) {
+                        // Monstre type 1 (30 %)
                         p[i][j].contenu = 2;
                         p[i][j].mstr.hp = 80;
                         p[i][j].mstr.xp = 10;
                         p[i][j].mstr.type = 1;
-                    } else if (proba <= 60) {
+                    } else if (proba <= 50) {
                         // Monstre type 2 (20 %)
                         p[i][j].contenu = 2;
                         p[i][j].mstr.hp = 180;
                         p[i][j].mstr.xp = 20;
                         p[i][j].mstr.type = 2;
-                    } else if (proba <= 70) {
+                    } else if (proba <= 60) {
                         // Monstre type 3 (10 %)
                         p[i][j].contenu = 2;
                         p[i][j].mstr.hp = 260;
                         p[i][j].mstr.xp = 30;
                         p[i][j].mstr.type = 3;
-                    } else if (proba <= 90) {
+                    } else if (proba <= 80) {
                         // Coffre (20 %)
                         p[i][j].contenu = 3;
                         p[i][j].spe.type = 1;
+                    } else if (proba <= 95) {
+                        // Machine (15 %)
+                        p[i][j].contenu = 3;
+                        p[i][j].spe.type = 2;
                     } else {
-                        // Machine (10 %)
-                        if (grandesMachinesPlacees < 3 && aleatoire(1, 100) <= 10) { // 10 % de chance de grande machine
+                        // Grande Machine (5 %)
+                        if (grandesMachinesPlacees < 3) {
                             p[i][j].contenu = 3;
                             p[i][j].spe.type = 3; // Grande machine
                             grandesMachinesPlacees++;
@@ -385,6 +390,55 @@ int generation(int longueur, int largeur, int num_salle, int cote) {
     return EXIT_SUCCESS;
 }
 
+int genererSalleBoss(int cote) {
+    int largeur = 11;
+    int longueur = 7;
+    int posX = perso.posX - largeur / 2;  // Centrer horizontalement
+    int posY = perso.posY - longueur;    // Placer au-dessus du joueur
+
+    // Vérifier si la salle peut être générée
+    if (!verifierPlacementSalle(longueur, largeur, posX, posY)) {
+        SDL_Log("Erreur : Emplacement invalide pour la salle du boss.");
+        return 0; // Retourner 0 si la salle ne peut pas être générée
+    }
+
+    // Générer une salle vide pour le boss
+    for (int i = posX; i < posX + largeur; i++) {
+        for (int j = posY; j < posY + longueur; j++) {
+            if (i == posX || i == posX + largeur - 1 || j == posY || j == posY + longueur - 1) {
+                map[i][j].contenu = -2; // Mur
+            } else {
+                map[i][j].contenu = 0; // Vide
+            }
+        }
+    }
+
+    // Placer la porte du boss
+    map[perso.posX][perso.posY - 1].contenu = 4; // Porte de boss
+
+    // Placer le boss dans un rectangle 2x3 au centre supérieur
+    int bossStartX = posX + largeur / 2 - 1;
+    int bossStartY = posY + 1; // Une ligne en dessous du mur supérieur
+    for (int i = bossStartX; i < bossStartX + 3; i++) {
+        for (int j = bossStartY; j < bossStartY + 2; j++) {
+            map[i][j].contenu = 2;           // Type boss
+            map[i][j].mstr.type = 4;
+            map[i][j].mstr.hp = 9999;
+            map[i][j].mstr.morceau = (j - bossStartY) * 3 + (i - bossStartX) ; // Identifier chaque morceau
+            if (map[i][j].mstr.morceau == 1) { //Initialisation des info du boss
+                boss.hp = BOSSSHP;
+                boss.max_hp = 1000;
+                boss.x = i;
+                boss.y = j;
+                boss.invulnerable = SDL_FALSE;
+                boss.invuln_timer = 0;
+            }
+        }
+    }
+
+    return 1; // Indiquer que la salle a été générée
+}
+
 void ajouterSalle(void) {
     int n = 0, m = 0;
 
@@ -404,7 +458,7 @@ void ajouterSalle(void) {
             map[i][j].contenu = room.cases[n][m].contenu;
             map[i][j].mstr.hp = room.cases[n][m].mstr.hp;
             map[i][j].mstr.xp = room.cases[n][m].mstr.xp;
-            map[i][j].mstr.loot = room.cases[n][m].mstr.loot;
+            map[i][j].mstr.morceau = room.cases[n][m].mstr.morceau;
             map[i][j].mstr.type = room.cases[n][m].mstr.type;
             map[i][j].spe.type = room.cases[n][m].spe.type;
             map[i][j].spe.inv = room.cases[n][m].spe.inv;
